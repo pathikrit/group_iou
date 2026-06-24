@@ -52,7 +52,7 @@
   th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
   th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
   td.amt{text-align:right;font-weight:600}
-  td.amt.pos{color:var(--pos)} td.amt.neg{color:var(--neg)}
+  td.amt.pos{color:var(--pos)} td.amt.neg{color:var(--neg)} td.amt.zero{color:var(--muted)}
   tr.person{cursor:pointer;transition:background .15s}
   tr.person:hover{background:var(--panel2)}
   tr.person.active{background:#22304a}
@@ -443,11 +443,21 @@ function buildDot(transfers){
   // top-to-bottom on phones so the graph fills the tall screen (and scales up,
   // rather than a wide left-to-right graph shrinking to fit the narrow width)
   const rankdir = MOBILE_MQ.matches ? 'TB' : 'LR';
+  // one uniform diameter for every node, sized to fit the longest name (so all
+  // circles match AND nothing clips). ~0.6em avg glyph; /0.78 to fit a line in a
+  // circle; +padding.
+  // only people with a non-zero balance appear in the graph; settled / no-IOU
+  // ($0) people stay in the table but are omitted here (an isolated node would
+  // float to a random spot since it has no edges).
+  const shown = people.filter(p => Math.abs(p.balance) > EPS);
+  const NAME_PT = 14;
+  const maxChars = Math.max(3, ...shown.map(p => p.name.length));
+  const diameter = Math.max(1.0, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.25).toFixed(2);
   let dot = 'digraph G {\n';
   dot += `  bgcolor="transparent"; rankdir=${rankdir}; pad=0.2; nodesep=0.5; ranksep=0.8;\n`;
-  dot += `  node [shape=circle, style="filled", fontname="${fontname}", fontsize=14, penwidth=2, color="#0b0d11", margin=0.08];\n`;
+  dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${fontname}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
-  for(const p of people){
+  for(const p of shown){
     const lbl = `<${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
     dot += `  "${esc(p.name)}" [id="${p.nodeId}", label=${lbl}, fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
   }
@@ -494,7 +504,8 @@ function applyGraphSelection(){
   d3.selectAll('#graph g.node, #graph g.edge').classed('keep', false).classed('hl', false);
 
   const sel = activeNode && people.find(p => p.nodeId === activeNode);
-  if(!sel){ graph.classList.remove('selecting'); return; }
+  // no selection, or the selected person isn't in the graph ($0) -> don't dim
+  if(!sel || !document.getElementById(activeNode)){ graph.classList.remove('selecting'); return; }
   graph.classList.add('selecting');
 
   const keepNodes = new Set([activeNode]);
@@ -525,7 +536,7 @@ function renderTable(){
     const tr = document.createElement('tr');
     tr.className = 'person';
     tr.dataset.node = p.nodeId;
-    const sign = p.balance < 0 ? 'neg' : 'pos';
+    const sign = Math.abs(p.balance) <= EPS ? 'zero' : (p.balance < 0 ? 'neg' : 'pos');
     tr.innerHTML =
       `<td><span class="dot" style="background:${p.color}"></span><span class="name">${escapeHtml(p.name)}</span></td>` +
       `<td class="amt ${sign}">${moneyWhole(p.balance)}</td>`;
@@ -634,13 +645,16 @@ function applyCsv(text){
     dataRows = rows;
   }
 
-  // one person per row, with a value per dataset column ('' / non-numeric -> 0)
+  // One person per row, value per dataset column. A number (incl. explicit 0 =
+  // "played, evened out") means present; an EMPTY cell means absent that column
+  // and is stored as null so it can be hidden. Rows with no data anywhere, and
+  // nameless / Total rows, are skipped.
   const rp = [];
   for(const r of dataRows){
     const name = (r[0] == null ? '' : String(r[0])).trim();
     if(!name || name.toLowerCase() === 'total') continue;
-    if(!ds.some(d => !isNaN(parseAmount(r[d.col])))) continue;   // no numbers -> skip
-    const values = ds.map(d => { const v = parseAmount(r[d.col]); return isNaN(v) ? 0 : round2(v); });
+    const values = ds.map(d => { const v = parseAmount(r[d.col]); return isNaN(v) ? null : round2(v); });
+    if(values.every(v => v === null)) continue;
     rp.push({ name, values });
   }
 
@@ -661,9 +675,14 @@ function applyCsv(text){
 function showDataset(idx){
   selectedDataset = idx;
   activeNode = null;
-  people = rawPeople.map((rp, i) => ({
-    name: rp.name, balance: rp.values[idx], idx: i, color: colorFor(i), nodeId: 'node-' + i
-  }));
+  // only people present (non-empty cell) in this column; color/nodeId keyed by the
+  // stable rawPeople index so colors are consistent across columns
+  people = [];
+  rawPeople.forEach((rp, i) => {
+    const v = rp.values[idx];
+    if(v == null) return;   // absent this column -> don't show
+    people.push({ name: rp.name, balance: v, idx: i, color: colorFor(i), nodeId: 'node-' + i });
+  });
   document.querySelectorAll('#dsToggle .seg').forEach((b, i) => b.classList.toggle('active', i === idx));
   document.getElementById('balHead').textContent = datasets[idx].label;
 
