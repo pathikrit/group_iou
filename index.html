@@ -17,33 +17,25 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.4/papaparse.min.js"></script>
 
 <style>
-  /* Only what Bootstrap utilities/components can't express: a darker dark-theme
-     palette and the graph's SVG internals. Everything else uses Bootstrap. */
+  /* The only non-Bootstrap CSS: a darker dark palette (via Bootstrap's own CSS
+     variables — its recommended theming hook), the Graphviz SVG internals (no
+     Bootstrap equivalent), and a few responsive font sizes utilities can't do. */
   [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
-  .nav-tabs .nav-link{color:var(--bs-secondary-color);font-size:1.15rem}
-  .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
-  /* dataset toggle pills — dated snapshots; CTA pills (IOU/All Time) a touch bigger */
-  #dsToggle{align-items:center}
-  #dsToggle .btn{font-size:1.05rem;padding:.4rem 1.1rem}
-  #dsToggle .ds-cta{font-size:1.15rem;padding:.45rem 1.3rem;font-weight:600}
+  /* responsive font sizes (bumped on mobile below) */
+  .nav-tabs .nav-link{font-size:1.15rem}
+  #balTable{font-size:1.25rem}
+  #txnTable{font-size:1.15rem}
 
-  /* balances + transactions tables (Bootstrap Table) — selection + chip sizing */
-  #balTable{font-size:1.3rem}    /* prominent — this is the main content */
-  #txnTable{font-size:1.15rem}   /* the ledger is secondary — a touch smaller */
-  #balTable td{cursor:pointer}
-  #balTable tbody tr.table-active{--bs-table-bg-state:rgba(96,165,250,.16)}
-  #balTable .badge,#txnTable .badge{font-size:.95em}   /* chip scales with the table font */
-  .bootstrap-table .fixed-table-container{border:0}
-  /* Transactions: show ~10 newest rows, then scroll, with a sticky header */
+  /* Transactions: ~10 newest rows then scroll, with a sticky header */
   #pane-txn .fixed-table-body{max-height:32rem;overflow:auto}
   #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
-  /* graph (SVG internals have no Bootstrap equivalent) — kept compact, table-first */
-  #graph{min-height:140px}
-  #graph svg{max-width:74%;height:auto;display:block;margin:0 auto}
+  /* graph (Graphviz SVG internals — no Bootstrap equivalent) */
+  #graph{min-height:160px;overflow-x:hidden}    /* never scroll the page horizontally */
+  #graph svg{max-width:82%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -54,13 +46,11 @@
 
   @media (max-width:768px){
     .nav-tabs .nav-link{font-size:1.35rem}
-    #dsToggle .btn{font-size:1.1rem;padding:.45rem 1.15rem}
-    #dsToggle .ds-cta{font-size:1.25rem;padding:.5rem 1.3rem}
-    #balTable{font-size:1.7rem}     /* big & legible on phones */
-    #txnTable{font-size:1.4rem}     /* ledger a touch smaller */
+    #balTable{font-size:1.6rem}
+    #txnTable{font-size:1.4rem}
     #pane-txn .fixed-table-body{max-height:60vh}
-    #graph{min-height:210px}
-    #graph svg{max-width:92%}                  /* smaller than the table, but visible */
+    #graph{min-height:240px}
+    #graph svg{max-width:100%}     /* fill width so the graph never scrolls the page */
   }
 </style>
 </head>
@@ -91,7 +81,7 @@
       </ul>
       <div class="tab-content">
         <div class="tab-pane fade show active" id="pane-bal" role="tabpanel">
-          <div id="dsToggle" class="d-flex flex-wrap gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
+          <div id="dsToggle" class="d-flex flex-wrap align-items-center gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
           <table id="balTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-txn" role="tabpanel">
@@ -112,6 +102,13 @@
 
   <div id="settleCard" class="card mb-3 d-none">
     <div class="card-body">
+      <div id="netToggleWrap" class="d-none justify-content-end mb-2">
+        <div class="form-check form-switch m-0">
+          <input class="form-check-input" type="checkbox" role="switch" id="netToggle" checked>
+          <label class="form-check-label" for="netToggle"
+                 title="Net: at most one edge per pair (A→B minus B→A)">Net</label>
+        </div>
+      </div>
       <div id="graph" class="overflow-hidden text-center"></div>
     </div>
   </div>
@@ -426,6 +423,7 @@ let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
 let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
+let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual IOU/All Time)
 let selectedDataset = 0;
@@ -496,7 +494,7 @@ function renderGraph(transfers){
   const gv = d3.select('#graph').graphviz({ useWorker: false, fit: true, zoom: false });
   gv.onerror(msg => {
     document.getElementById('graph').innerHTML =
-      '<p class="muted">Could not render graph: ' + msg + '</p>';
+      '<p class="text-danger m-0">Could not render graph: ' + msg + '</p>';
   });
   gv.renderDot(dot, () => {
     const svg = d3.select('#graph svg');
@@ -890,28 +888,46 @@ function renderBalGraph(){
   activeNode = null;
   graphMode = 'balances';
   graphNodes = people;
+  document.getElementById('netToggleWrap').classList.replace('d-flex', 'd-none');
   document.getElementById('settleCard').classList.remove('d-none');
   renderGraph(computeTransfers(people).transfers);
 }
 
-// Raw transfer-ledger graph: no settlement algorithm — just group the ledger by
-// (from, to) and sum the amounts (a dense all-pairs graph is fine). $0 edges omitted.
-function txnGraphData(){
+// Raw transfer-ledger graph: no settlement algorithm. Sum the ledger per directed
+// (from, to) pair. net=false keeps both directions (<=2 edges per pair); net=true
+// collapses each pair to a single edge in the surplus direction (A->B minus B->A),
+// always positive from->to. $0 edges omitted. (A dense all-pairs graph is fine.)
+function txnGraphData(net){
   const names = [...new Set(transactions.flatMap(t => [t.from, t.to]))];
   const nodes = names.map(name => ({
     name, color: colorForName(name), emoji: '',
     nodeId: 'node-' + rawPeople.findIndex(p => p.name === name)
   }));
-  const agg = new Map();                       // 'from|to' pair -> {from, to, amount}
+  const dir = new Map();                        // from + NUL + to -> {from, to, amount}
   for(const t of transactions){
     const k = t.from + '\u0000' + t.to;       // NUL can't appear in a name
-    const e = agg.get(k) || { from: t.from, to: t.to, amount: 0 };
+    const e = dir.get(k) || { from: t.from, to: t.to, amount: 0 };
     e.amount += t.amount;
-    agg.set(k, e);
+    dir.set(k, e);
   }
-  const edges = [...agg.values()]
-    .filter(e => Math.abs(e.amount) > EPS)      // skip $0 edges
-    .sort((a, b) => b.amount - a.amount);
+  let edges;
+  if(net){
+    edges = [];
+    const done = new Set();
+    for(const [k, e] of dir){
+      if(done.has(k)) continue;
+      const revK = e.to + '\u0000' + e.from;
+      done.add(k); done.add(revK);
+      const rev = dir.get(revK);
+      const amt = e.amount - (rev ? rev.amount : 0);
+      if(Math.abs(amt) <= EPS) continue;        // evened out -> no edge
+      edges.push(amt > 0 ? { from: e.from, to: e.to, amount: amt }
+                         : { from: e.to, to: e.from, amount: -amt });
+    }
+  }else{
+    edges = [...dir.values()].filter(e => Math.abs(e.amount) > EPS).map(e => ({ ...e }));
+  }
+  edges.sort((a, b) => b.amount - a.amount);
   return { nodes, edges };
 }
 
@@ -919,7 +935,8 @@ function renderTxnGraph(){
   if(!transactions.length) return;
   activeNode = null;
   graphMode = 'txn';
-  const { nodes, edges } = txnGraphData();
+  document.getElementById('netToggleWrap').classList.replace('d-none', 'd-flex');
+  const { nodes, edges } = txnGraphData(txnNet);
   graphNodes = nodes;
   document.getElementById('settleCard').classList.remove('d-none');
   renderGraph(edges);
@@ -932,46 +949,67 @@ function renderDatasetToggle(){
   el.innerHTML = '';
   el.classList.toggle('d-none', datasets.length <= 1);   // no toggle for a single column
 
-  const mkPill = (i, cta) => {
+  const pick = i => () => { userPicked = true; showDataset(i); };
+
+  // computed columns (IOU / All Time) first, as standalone CTA pills
+  datasets.forEach((d, i) => {
+    if(d.col !== undefined) return;
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.ds = i;
-    // computed columns (IOU / All Time, no source col) are larger CTA pills
-    b.className = 'btn rounded-pill btn-outline-secondary' + (cta ? ' ds-cta' : ' btn-sm');
-    b.textContent = datasets[i].label;
-    b.addEventListener('click', () => { userPicked = true; showDataset(i); });
-    return b;
-  };
+    b.className = 'btn btn-lg rounded-pill btn-outline-secondary fw-semibold';
+    b.textContent = d.label;
+    b.addEventListener('click', pick(i));
+    el.appendChild(b);
+  });
 
-  // computed columns (IOU / All Time) first, as CTA pills
-  datasets.forEach((d, i) => { if(d.col === undefined) el.appendChild(mkPill(i, true)); });
-
-  // dated columns rightmost-first (latest first); up to MAX_DATED_PILLS, rest in "More"
+  // dated columns rightmost-first as a Bootstrap btn-group; overflow -> nested dropdown
   const dated = datasets.map((d, i) => i).filter(i => datasets[i].col !== undefined).reverse();
+  if(!dated.length) return;
   const overflow = dated.length > MAX_DATED_PILLS ? dated.slice(MAX_DATED_PILLS) : [];
-  (overflow.length ? dated.slice(0, MAX_DATED_PILLS) : dated).forEach(i => el.appendChild(mkPill(i, false)));
+  const shown = overflow.length ? dated.slice(0, MAX_DATED_PILLS) : dated;
+
+  const group = document.createElement('div');
+  group.className = 'btn-group';
+  group.setAttribute('role', 'group');
+  shown.forEach(i => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.ds = i;
+    b.className = 'btn btn-outline-secondary';
+    b.textContent = datasets[i].label;
+    b.addEventListener('click', pick(i));
+    group.appendChild(b);
+  });
 
   if(overflow.length){
-    const dd = document.createElement('div');
-    dd.className = 'dropdown';
-    dd.id = 'dsMore';
-    dd.innerHTML =
-      '<button type="button" class="btn btn-sm rounded-pill btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">More</button>' +
-      '<ul class="dropdown-menu dropdown-menu-end"></ul>';
-    const ul = dd.querySelector('ul');
+    const sub = document.createElement('div');
+    sub.className = 'btn-group';
+    sub.id = 'dsMore';
+    sub.setAttribute('role', 'group');
+    const tgl = document.createElement('button');
+    tgl.type = 'button';
+    tgl.className = 'btn btn-outline-secondary dropdown-toggle';
+    tgl.setAttribute('data-bs-toggle', 'dropdown');
+    tgl.setAttribute('aria-expanded', 'false');
+    tgl.textContent = 'More';
+    const menu = document.createElement('ul');
+    menu.className = 'dropdown-menu dropdown-menu-end';
     overflow.forEach(i => {
       const it = document.createElement('button');
       it.type = 'button';
       it.dataset.ds = i;
       it.className = 'dropdown-item';
       it.textContent = datasets[i].label;
-      it.addEventListener('click', () => { userPicked = true; showDataset(i); });
+      it.addEventListener('click', pick(i));
       const li = document.createElement('li');
       li.appendChild(it);
-      ul.appendChild(li);
+      menu.appendChild(li);
     });
-    el.appendChild(dd);
+    sub.append(tgl, menu);
+    group.appendChild(sub);
   }
+  el.appendChild(group);
 }
 
 // Highlight the selected dataset across the pills + the "More" dropdown.
@@ -1004,6 +1042,11 @@ function main(){
   // Transactions -> raw transfer-ledger graph
   document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
   document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderTxnGraph);
+  // Net toggle re-renders the (transactions) graph: net vs both-directions
+  document.getElementById('netToggle').addEventListener('change', e => {
+    txnNet = e.target.checked;
+    if(graphMode === 'txn') renderTxnGraph();
+  });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
     if(!v) return;

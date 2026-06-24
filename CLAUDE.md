@@ -12,8 +12,11 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 
 ## Deps (pinned CDNs in `index.html`)
 - `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
-  the small `<style>` block only overrides the palette (darker than BS default) and
-  styles the graph/chips. Use Bootstrap components/utilities, not hand-rolled CSS.
+  the tiny `<style>` block is deliberately minimal — a darker palette (via Bootstrap's
+  own `--bs-*` CSS variables, its theming hook), the Graphviz SVG internals (no
+  Bootstrap equivalent), and a couple of responsive font-sizes utilities can't
+  express. **Everything else must be Bootstrap components/utilities — do not
+  hand-roll CSS or components.**
 - `bootstrap-table@1.27.3` (+ its CSS) drives the **Balances table** — sortable
   columns (#, Name chip, Balance), init in `initBalTable`, rows loaded in
   `renderTable` via `bootstrapTable('load', …)`. Requires **`jquery@3.7.1`** (load
@@ -21,8 +24,11 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   bootstrap-table; use d3 for everything else.
 - `d3@7.9.0`, `@hpcc-js/wasm@2.34.2`, `d3-graphviz@5.6.0` (DOT→SVG), `papaparse@5.5.4`.
 - Tabs use Bootstrap's tab plugin (`data-bs-toggle="tab"`); switch programmatically
-  via `showTab(id)`. Dataset toggle = rounded-pill buttons (`#dsToggle`). Status
-  banner = a Bootstrap `.alert` (`setStatus`).
+  via `showTab(id)`. Dataset toggle (`#dsToggle`, `renderDatasetToggle`): IOU/All
+  Time as `btn-lg rounded-pill` CTA buttons, then dated columns rightmost-first in a
+  Bootstrap `.btn-group`, overflow (> `MAX_DATED_PILLS`) in a **nested `.btn-group`
+  dropdown** ("More"); active state via `markActiveDataset`. Status banner = a
+  Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
 - Sheet is the pubhtml URL, entered in the **Input** tab; remembered in
@@ -93,10 +99,14 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
   graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on
   **Transactions** it's the *raw ledger* graph (`renderTxnGraph`/`txnGraphData`) —
-  **no settlement algorithm**, just the ledger grouped by `(from,to)` with summed
-  amounts (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
+  **no settlement algorithm**, just the ledger summed per directed `(from,to)` pair
+  (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
   `buildDot`/`applyGraphSelection` operate on `graphNodes` (the nodes currently
   drawn) so highlight/selection work in both modes.
+- **Net toggle** (`#netToggle`, `txnNet`, shown only in the txn graph via
+  `#netToggleWrap`): on (default) collapses each pair to a single edge in the
+  surplus direction (`A→B` minus `B→A`); off keeps both directions (≤2 edges/pair).
+  Edges are always positive `from→to`; a pair that evens out shows no edge.
 - Amounts (balances + transfers) display in **dollars** (`moneyWhole`).
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
   Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
