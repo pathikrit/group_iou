@@ -10,13 +10,19 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   all deps from pinned CDNs), `.github/workflows/deploy.yml`, `CLAUDE.md`, `.git/`.
   NO other files.
 
-## Deps (pinned CDNs in `index.html`) — and why no framework
+## Deps (pinned CDNs in `index.html`)
+- `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
+  the small `<style>` block only overrides the palette (darker than BS default) and
+  styles the graph/chips. Use Bootstrap components/utilities, not hand-rolled CSS.
+- `bootstrap-table@1.27.3` (+ its CSS) drives the **Balances table** — sortable
+  columns (#, Name chip, Balance), init in `initBalTable`, rows loaded in
+  `renderTable` via `bootstrapTable('load', …)`. Requires **`jquery@3.7.1`** (load
+  order: jQuery → bootstrap bundle → bootstrap-table). jQuery is ONLY for
+  bootstrap-table; use d3 for everything else.
 - `d3@7.9.0`, `@hpcc-js/wasm@2.34.2`, `d3-graphviz@5.6.0` (DOT→SVG), `papaparse@5.5.4`.
-- **Don't add Bootstrap/jQuery** (already considered & rejected): jQuery duplicates
-  `d3-selection` (already loaded); Bootstrap is bigger than our ~130 lines of custom
-  dark CSS + ~15 lines of tab JS and fights the single-file/minimal goal. Bulk of
-  the code is the algorithm + graph, which no UI lib helps. If unifying DOM access,
-  lean on `d3.select`, not a new lib.
+- Tabs use Bootstrap's tab plugin (`data-bs-toggle="tab"`); switch programmatically
+  via `showTab(id)`. Dataset toggle = rounded-pill buttons (`#dsToggle`). Status
+  banner = a Bootstrap `.alert` (`setStatus`).
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
 - Sheet is the pubhtml URL, entered in the **Input** tab; remembered in

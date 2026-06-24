@@ -1,176 +1,104 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Group IOU</title>
 
 <!-- All dependencies inline from CDN with pinned versions (see CLAUDE.md) -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2.34.2/dist/graphviz.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-graphviz@5.6.0/build/d3-graphviz.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.4/papaparse.min.js"></script>
 
 <style>
-  :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
-    --text:#e7e9ee; --muted:#9aa3b2; --pos:#34d399; --neg:#f87171;
-    --accent:#60a5fa; --shadow:0 6px 24px rgba(0,0,0,.35);
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{
-    background:var(--bg); color:var(--text);
-    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-text-size-adjust:100%;
-  }
-  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 64px;}
-  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:.2em 0 1.2em}
-  header h1{font-size:1.5rem;margin:0;min-width:0}
-  #appTitle{color:inherit;text-decoration:none;display:inline-block;overflow:hidden;
-    text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-  #appTitle:hover{text-decoration:underline;text-decoration-color:var(--accent)}
-  .gh{color:var(--muted);display:inline-flex;flex:0 0 auto}
-  .gh:hover{color:var(--text)}
-  .gh svg{width:26px;height:26px;display:block}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-    padding:16px;margin:0 0 18px;box-shadow:var(--shadow)}
-  h2{font-size:1.05rem;margin:.1em 0 .8em;color:var(--text)}
-  .muted{color:var(--muted)}
-  a{color:var(--accent)}
+  /* Only what Bootstrap utilities/components can't express: a darker dark-theme
+     palette and the graph's SVG internals. Everything else uses Bootstrap. */
+  [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
+  .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
+  .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
+  .nav-tabs .nav-link{color:var(--bs-secondary-color)}
+  .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
-  /* banners */
-  .banner{border-radius:12px;padding:12px 14px;margin:0 0 18px;font-size:.95rem}
-  .banner.error{background:#3a1517;border:1px solid #6b2326;color:#fecaca}
-  .banner.ok{background:#0f2a20;border:1px solid #1f5c44;color:#bbf7d0}
-  .banner.info{background:#13233a;border:1px solid #244a73;color:#cfe2ff}
-  .hidden{display:none !important}
+  /* balances table (Bootstrap Table) — selection highlight + chip sizing */
+  #balTable td{cursor:pointer}
+  #balTable tbody tr.table-active{--bs-table-bg-state:rgba(96,165,250,.16)}
+  #balTable .badge{font-size:.95em}        /* chip scales with the table font */
+  .bootstrap-table .fixed-table-container{border:0}
 
-  /* table */
-  .tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
-  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
-  th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
-  td.amt{text-align:right;font-weight:600}
-  td.amt.pos{color:var(--pos)} td.amt.neg{color:var(--neg)} td.amt.zero{color:var(--muted)}
-  .rank{color:var(--muted);text-align:right;width:1%;white-space:nowrap;font-variant-numeric:tabular-nums}
-  tr.person{cursor:pointer;transition:background .15s}
-  tr.person:hover{background:var(--panel2)}
-  tr.person.active{background:#22304a}
-  .chip{display:inline-block;padding:4px 10px;border-radius:6px;font-weight:600;
-    border:1px solid rgba(255,255,255,.15)}
-
-  /* graph */
-  #graph{width:100%;overflow:hidden;text-align:center;min-height:120px}
+  /* graph (SVG internals have no Bootstrap equivalent) */
+  #graph{min-height:160px}
   #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
-  /* when a node is selected, dim everything except the kept (connected) parts */
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
-  /* highlight the selected node + its edges */
   #graph g.node.hl ellipse,#graph g.node.hl polygon,#graph g.node.hl path{
-    stroke:#fff !important;stroke-width:4px !important;
-    filter:drop-shadow(0 0 6px rgba(255,255,255,.6));
-  }
+    stroke:#fff !important;stroke-width:4px !important;filter:drop-shadow(0 0 6px rgba(255,255,255,.6));}
   #graph g.edge.keep path{stroke-width:3px !important}
   #graph g.edge.keep text{font-weight:700}
 
-  /* tabs */
-  .tabs{display:flex;gap:2px;margin:0 0 14px;border-bottom:1px solid var(--line)}
-  .tab{background:none;border:none;color:var(--muted);font-weight:600;font-size:.95rem;
-    padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
-  .tab:hover{color:var(--text)}
-  .tab.active{color:var(--text);border-bottom-color:var(--accent)}
-
-  /* segmented toggle (dataset / column picker) */
-  .seg-toggle{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap}
-  .seg{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:8px;
-    padding:6px 13px;font-weight:600;font-size:.85rem;cursor:pointer}
-  .seg:hover{color:var(--text)}
-  .seg.active{background:var(--accent);color:#06203f;border-color:var(--accent)}
-
-  /* source / embed */
-  .srcrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
-  .srcrow input{flex:1;min-width:220px;background:var(--panel2);color:var(--text);
-    border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:.9rem}
-  .srcrow button{background:var(--accent);color:#06203f;border:none;border-radius:8px;
-    padding:9px 14px;font-weight:700;cursor:pointer}
-  .iframewrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .iframewrap iframe{width:100%;height:360px;border:0;background:#fff}
-  /* graph box + DOT-source overlay toggled by the little (i) button */
-  .graphbox{position:relative}
-  .dot-info{position:absolute;bottom:8px;right:8px;width:26px;height:26px;border-radius:50%;
-    border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;
-    font-size:1rem;line-height:1;display:flex;align-items:center;justify-content:center;z-index:4}
-  .dot-info:hover{color:var(--text)}
-  #dotSource{position:absolute;inset:0;z-index:3;margin:0;padding:12px;overflow:auto;
-    background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--muted);
-    font-size:.8rem;line-height:1.45;white-space:pre;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-
-  @media (max-width:560px){
-    .wrap{padding:14px 12px 56px}
-    .card{padding:14px}
-    header h1{font-size:1.9rem}
-    /* bigger, more tappable tabs + toggle + buttons */
-    .tab{font-size:1.2rem;padding:14px 18px}
-    .seg{font-size:1.15rem;padding:13px 18px}
-    .srcrow input{font-size:1.05rem;padding:13px 13px}
-    .srcrow button{font-size:1.05rem;padding:13px 20px}
-    /* much roomier, more legible balances table */
-    table{font-size:1.2rem}
-    th,td{padding:17px 12px}
-    th{font-size:1rem}
-    .rank{font-size:1.15rem}
-    .chip{font-size:1.25rem;padding:8px 15px}
-    td.amt{font-size:1.4rem}
-    /* taller graph + larger DOT text */
+  @media (max-width:768px){
+    .nav-link{font-size:1.2rem}
+    #dsToggle .btn{font-size:1.05rem}
+    #balTable{font-size:1.25rem}
     #graph{min-height:320px}
-    #dotSource{font-size:.9rem}
   }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <h1><a id="appTitle" href="#" target="_blank" rel="noopener">Group IOU</a></h1>
-    <a class="gh" href="https://github.com/pathikrit/group_iou" target="_blank" rel="noopener"
+<div class="container py-3" style="max-width:960px">
+  <header class="d-flex align-items-center justify-content-between gap-3 mb-3">
+    <h1 class="h2 m-0 text-truncate"><a id="appTitle" class="link-body-emphasis text-decoration-none text-truncate d-inline-block mw-100" href="#" target="_blank" rel="noopener">Group IOU</a></h1>
+    <a class="link-secondary flex-shrink-0" href="https://github.com/pathikrit/group_iou" target="_blank" rel="noopener"
        aria-label="View source on GitHub" title="View source on GitHub">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+      <svg width="28" height="28" class="d-block" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
     </a>
   </header>
 
-  <div id="status" class="banner info">Loading sheet…</div>
+  <div id="status" class="alert d-none" role="alert"></div>
 
-  <section id="tableCard" class="card hidden">
-    <div class="tabs" data-tabs>
-      <button class="tab active" data-tab="pretty">Balances</button>
-      <button class="tab" data-tab="original">Input</button>
-    </div>
-    <div class="tabpanel" data-panel="pretty">
-      <div id="dsToggle" class="seg-toggle hidden"></div>
-      <div class="tablewrap">
-        <table>
-          <tbody id="tbody"></tbody>
-        </table>
+  <div id="tableCard" class="card mb-3 d-none">
+    <div class="card-body">
+      <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-bal" data-bs-toggle="tab" data-bs-target="#pane-bal" type="button" role="tab">Balances</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-input" data-bs-toggle="tab" data-bs-target="#pane-input" type="button" role="tab">Input</button>
+        </li>
+      </ul>
+      <div class="tab-content">
+        <div class="tab-pane fade show active" id="pane-bal" role="tabpanel">
+          <div id="dsToggle" class="d-flex flex-wrap gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
+          <table id="balTable"></table>
+        </div>
+        <div class="tab-pane fade" id="pane-input" role="tabpanel">
+          <div class="input-group input-group-lg mb-3">
+            <input id="dbInput" type="text" class="form-control" spellcheck="false" placeholder="Published Google Sheet URL …/pubhtml?gid=0&single=true" />
+            <button id="dbLoad" class="btn btn-primary" type="button">Load</button>
+          </div>
+          <div class="ratio" style="--bs-aspect-ratio:70%">
+            <iframe id="srcFrame" class="rounded border-0 bg-white" title="Source sheet" loading="lazy"></iframe>
+          </div>
+        </div>
       </div>
     </div>
-    <div class="tabpanel hidden" data-panel="original">
-      <div class="srcrow">
-        <input id="dbInput" type="text" spellcheck="false" placeholder="Published Google Sheet URL (…/pubhtml?gid=0&single=true)" />
-        <button id="dbLoad">Load</button>
-      </div>
-      <div class="iframewrap"><iframe id="srcFrame" title="Source sheet" loading="lazy"></iframe></div>
-    </div>
-  </section>
+  </div>
 
-  <section id="settleCard" class="card hidden">
-    <div class="graphbox">
-      <div id="graph"></div>
-      <pre id="dotSource" class="hidden"></pre>
-      <button id="dotToggle" class="dot-info" aria-label="Show DOT source" title="DOT source">&#9432;</button>
+  <div id="settleCard" class="card mb-3 d-none">
+    <div class="card-body">
+      <div class="position-relative">
+        <div id="graph" class="overflow-hidden text-center"></div>
+        <pre id="dotSource" class="d-none position-absolute top-0 start-0 w-100 h-100 overflow-auto m-0 p-3 bg-body-tertiary border rounded small font-monospace text-secondary z-2"></pre>
+        <button id="dotToggle" class="btn btn-sm btn-outline-secondary rounded-circle position-absolute bottom-0 end-0 m-2 z-3" aria-label="Show DOT source" title="DOT source">&#9432;</button>
+      </div>
     </div>
-  </section>
+  </div>
 </div>
 
 <script>
@@ -475,7 +403,7 @@ function greedyTree(g){
 }
 
 /* ===================== RENDERING ===================== */
-const MOBILE_MQ = window.matchMedia('(max-width: 560px)');   // mobile = stacked graph
+const MOBILE_MQ = window.matchMedia('(max-width: 768px)');   // mobile = stacked graph
 let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
@@ -538,7 +466,7 @@ function renderGraph(transfers){
 
 function selectPerson(nodeId){
   activeNode = (activeNode === nodeId) ? null : nodeId;
-  d3.selectAll('#tbody tr.person').classed('active', function(){ return this.dataset.node === activeNode; });
+  highlightTable();
   applyGraphSelection();
 }
 
@@ -571,26 +499,42 @@ function applyGraphSelection(){
 function clearSelection(){
   if(!activeNode) return;
   activeNode = null;
-  d3.selectAll('#tbody tr.person').classed('active', false);
+  highlightTable();
   applyGraphSelection();
 }
 
-function renderTable(){
-  const tb = document.getElementById('tbody');
-  tb.innerHTML = '';
-  people.forEach((p, i) => {
-    const tr = document.createElement('tr');
-    tr.className = 'person';
-    tr.dataset.node = p.nodeId;
-    const sign = Math.abs(p.balance) <= EPS ? 'zero' : (p.balance < 0 ? 'neg' : 'pos');
-    tr.innerHTML =
-      `<td class="rank">${i + 1}</td>` +
-      `<td><span class="chip" style="background:${p.color};color:${textOn(p.color)}">${escapeHtml(p.name)}</span></td>` +
-      `<td class="amt ${sign}">${moneyWhole(p.balance)}</td>`;
-    tr.addEventListener('click', () => selectPerson(p.nodeId));
-    tb.appendChild(tr);
+// Bootstrap Table: init once, then load rows per dataset.
+function initBalTable(){
+  $('#balTable').bootstrapTable({
+    classes: 'table align-middle m-0',
+    columns: [
+      { field: 'rank', title: '#', align: 'center', valign: 'middle', sortable: true, class: 'text-secondary' },
+      { field: 'name', title: 'Name', sortable: true, widthUnit: '%', width: 100,
+        formatter: (v, row) => `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>` },
+      { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
+        sorter: (a, b) => a - b,
+        formatter: v => {
+          const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
+          return `<span class="fw-bold ${c}">${moneyWhole(v)}</span>`;
+        } }
+    ],
+    sortName: 'amount', sortOrder: 'desc',
+    rowAttributes: row => ({ 'data-node': row.nodeId }),
+    onClickRow: row => selectPerson(row.nodeId),
+    onPostBody: highlightTable    // re-apply selection after every (re)render / sort
   });
-  document.getElementById('tableCard').classList.remove('hidden');
+}
+
+function renderTable(){
+  const rows = people.map((p, i) => ({ rank: i + 1, name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId }));
+  $('#balTable').bootstrapTable('load', rows);
+  document.getElementById('tableCard').classList.remove('d-none');
+}
+
+// Reflect the current selection on the table rows.
+function highlightTable(){
+  document.querySelectorAll('#balTable tbody tr').forEach(tr =>
+    tr.classList.toggle('table-active', tr.getAttribute('data-node') === activeNode));
 }
 
 function escapeHtml(s){
@@ -598,24 +542,15 @@ function escapeHtml(s){
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function wireTabs(){
-  document.querySelectorAll('[data-tabs]').forEach(group => {
-    const card = group.parentElement;
-    group.querySelectorAll('.tab').forEach(tab =>
-      tab.addEventListener('click', () => activateTab(card, tab.dataset.tab)));
-  });
-}
-function activateTab(card, name){
-  card.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  card.querySelectorAll('.tabpanel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
-}
-
+// Show a Bootstrap alert; empty msg hides it.
 function setStatus(kind, msg){
   const el = document.getElementById('status');
-  el.className = 'banner ' + kind;
+  const cls = { error: 'alert-danger', ok: 'alert-success', info: 'alert-info' }[kind] || 'alert-secondary';
+  el.className = 'alert ' + cls;
   el.innerHTML = msg;
-  el.classList.toggle('hidden', !msg);
+  el.classList.toggle('d-none', !msg);
 }
+const showTab = id => bootstrap.Tab.getOrCreateInstance(document.getElementById(id)).show();
 
 /* ===================== MAIN ===================== */
 // Fetch + render a sheet. No URL params — the sheet comes from the UI / storage.
@@ -624,7 +559,7 @@ function setStatus(kind, msg){
 async function load(db){
   people = [];
   activeNode = null;
-  document.getElementById('settleCard').classList.add('hidden');
+  document.getElementById('settleCard').classList.add('d-none');
 
   // reflect the current source in the Input tab + make the title link to the sheet
   document.getElementById('dbInput').value = db;
@@ -662,8 +597,8 @@ async function load(db){
         '<code>http://localhost:8000/</code> — or use the deployed GitHub Pages URL.'
       : ' Make sure the sheet is published to the web. Use the <em>Input</em> tab to fix the URL.';
     setStatus('error', 'Could not load the sheet (' + escapeHtml(e.message) + ').' + fileHint);
-    document.getElementById('tableCard').classList.remove('hidden');
-    activateTab(document.getElementById('tableCard'), 'original');
+    document.getElementById('tableCard').classList.remove('d-none');
+    showTab('tab-input');
     return;
   }
 
@@ -734,28 +669,32 @@ function showDataset(idx){
   people.sort((a, b) => b.balance - a.balance);
   const pot = totalPot();
   people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
-  document.querySelectorAll('#dsToggle .seg').forEach((b, i) => b.classList.toggle('active', i === idx));
+  document.querySelectorAll('#dsToggle button').forEach((b, i) => {
+    b.classList.toggle('btn-primary', i === idx);
+    b.classList.toggle('btn-outline-secondary', i !== idx);
+  });
 
   renderTable();
   const net = people.reduce((a, p) => a + p.balance, 0);
   if(Math.abs(net) > EPS){
     setStatus('error', `"${escapeHtml(datasets[idx].label)}" balances don't net to $0 — ` +
       `off by <strong>${money(net)}</strong>. Fix the sheet so every dollar is accounted for.`);
-    document.getElementById('settleCard').classList.add('hidden');
+    document.getElementById('settleCard').classList.add('d-none');
     return;
   }
   setStatus('', '');
-  document.getElementById('settleCard').classList.remove('hidden');
+  document.getElementById('settleCard').classList.remove('d-none');
   renderGraph(computeTransfers(people).transfers);
 }
 
 function renderDatasetToggle(){
   const el = document.getElementById('dsToggle');
   el.innerHTML = '';
-  el.classList.toggle('hidden', datasets.length <= 1);   // no toggle for a single column
+  el.classList.toggle('d-none', datasets.length <= 1);   // no toggle for a single column
   datasets.forEach((d, i) => {
     const b = document.createElement('button');
-    b.className = 'seg';
+    b.type = 'button';
+    b.className = 'btn btn-sm rounded-pill btn-outline-secondary';
     b.textContent = d.label;
     b.addEventListener('click', () => showDataset(i));
     el.appendChild(b);
@@ -763,7 +702,7 @@ function renderDatasetToggle(){
 }
 
 function main(){
-  wireTabs();
+  initBalTable();
   // clicking empty space in the graph (not a node) clears the selection
   document.getElementById('graph').addEventListener('click', e => {
     if(!e.target.closest('g.node')) clearSelection();
@@ -772,13 +711,13 @@ function main(){
   MOBILE_MQ.addEventListener('change', () => { if(people.length) renderGraph(currentTransfers); });
   // little (i) button toggles the DOT source overlay over the graph
   document.getElementById('dotToggle').addEventListener('click', () => {
-    document.getElementById('dotSource').classList.toggle('hidden');
+    document.getElementById('dotSource').classList.toggle('d-none');
   });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
     if(!v) return;
     try { localStorage.setItem(STORE_KEY, v); } catch(e) {}
-    activateTab(document.getElementById('tableCard'), 'pretty');
+    showTab('tab-bal');
     load(v);
   });
   let saved = null;
