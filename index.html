@@ -25,6 +25,11 @@
   .nav-tabs .nav-link{color:var(--bs-secondary-color)}
   .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
+  /* dataset toggle pills — dated snapshots; CTA pills (Current/All Time) bigger */
+  #dsToggle{align-items:center}
+  #dsToggle .btn{font-size:1.05rem;padding:.4rem 1.1rem}
+  #dsToggle .ds-cta{font-size:1.35rem;padding:.55rem 1.6rem;font-weight:600}
+
   /* balances + transactions tables (Bootstrap Table) — selection + chip sizing */
   #balTable,#txnTable{font-size:1.1rem}    /* slightly larger than default */
   #balTable td{cursor:pointer}
@@ -45,7 +50,8 @@
 
   @media (max-width:768px){
     .nav-link{font-size:1.2rem}
-    #dsToggle .btn{font-size:1.05rem}
+    #dsToggle .btn{font-size:1.15rem;padding:.45rem 1.15rem}
+    #dsToggle .ds-cta{font-size:1.5rem;padding:.6rem 1.6rem}
     #balTable,#txnTable{font-size:1.35rem}
     #graph{min-height:280px}
     #graph svg{max-width:100%}            /* fill the narrow screen on mobile */
@@ -841,7 +847,10 @@ function renderDatasetToggle(){
   datasets.forEach((d, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'btn btn-sm rounded-pill btn-outline-secondary';
+    // computed columns (Current / All Time, no source col) are larger CTA pills;
+    // the dated snapshots stay smaller
+    const cta = d.col === undefined;
+    b.className = 'btn rounded-pill btn-outline-secondary' + (cta ? ' ds-cta' : ' btn-sm');
     b.textContent = d.label;
     b.addEventListener('click', () => showDataset(i));
     el.appendChild(b);
