@@ -1,82 +1,66 @@
-# Group IOU — project notes for Claude
+# Group IOU — notes for Claude
 
-A zero-backend single-page app that reads a publicly-published Google Sheet of net
-balances and computes the **fewest money transfers** needed to settle everyone up,
-rendered as a graph.
+Zero-backend single-page app: reads a published Google Sheet of net balances and
+draws the fewest money transfers to settle up, as an interactive DOT graph.
 
-## ⛔ RULES (must follow)
-- **DO NOT COMMIT OR PUSH until the user explicitly says so.** Make file changes
-  freely, but never run `git commit` / `git push` without an explicit go-ahead.
-- **Only these files may exist — NO OTHER FILES:**
-  - `index.html` — the entire app (HTML + CSS + JS in one file, all deps inline
-    from CDN with pinned versions).
-  - `.github/workflows/deploy.yml` — GitHub Pages deploy.
-  - `CLAUDE.md` — this file.
-  - (plus the `.git/` repo itself)
+## ⛔ RULES
+- **Never `git commit`/`push` without an explicit go-ahead each time.** (Editing
+  files freely is fine.)
+- **Only these files may exist:** `index.html` (whole app — HTML+CSS+JS inline,
+  all deps from pinned CDNs), `.github/workflows/deploy.yml`, `CLAUDE.md`, `.git/`.
+  NO other files.
 
-## How it works
-- Input is a Google Sheet **published to the web** (its `pubhtml` URL). The URL is
-  entered in the **Input** tab; it is remembered in `localStorage` (`STORE_KEY`)
-  across reloads. First-ever load falls back to the `DEMO` constant. **No URL
-  params** — `load(db)` re-fetches in place when the user clicks Load.
-- The `pubhtml` URL is converted to a CSV endpoint (`/pub?...&output=csv`), which
-  Google serves with `Access-Control-Allow-Origin: *`, so the page `fetch()`es it
-  directly — **no CORS proxy**.
-  - Caveat: opening `index.html` via `file://` gives an opaque (null) origin and
-    browsers block the fetch ("Failed to fetch"). Must be served over http(s)
-    (localhost or the deployed Pages URL). The error banner says so.
-- Column **0 is the name**. Every later column that has a **header label**
-  (e.g. `Current`, `All Time`, dated snapshots) becomes a selectable dataset.
-  A segmented toggle in the **Balances** tab switches which column drives both
-  the table and the graph (labels come straight from the sheet header — change
-  them in the sheet, not the code). Defaults to the first labeled column.
-  Blank/non-numeric cells in a column count as `0`; a `Total` row is skipped.
-  If no header labels exist (old single-column format), it falls back to one
-  `Balance` column and shows no toggle.
-- Amounts support `$`, commas, `(123)` and `-` negatives, and cents.
-- Asserts the balances net to `$0` within `EPS` (< 1 cent); otherwise shows an
-  error and suppresses the graph.
+## Deps (pinned CDNs in `index.html`) — and why no framework
+- `d3@7.9.0`, `@hpcc-js/wasm@2.34.2`, `d3-graphviz@5.6.0` (DOT→SVG), `papaparse@5.5.4`.
+- **Don't add Bootstrap/jQuery** (already considered & rejected): jQuery duplicates
+  `d3-selection` (already loaded); Bootstrap is bigger than our ~130 lines of custom
+  dark CSS + ~15 lines of tab JS and fights the single-file/minimal goal. Bulk of
+  the code is the algorithm + graph, which no UI lib helps. If unifying DOM access,
+  lean on `d3.select`, not a new lib.
 
-## Algorithm (in `computeTransfers`) — strict lexicographic objective
-1. **Fewest transfers** = `n − k`, where `k` = max number of disjoint zero-sum
-   subgroups. Found with a bitmask DP over subsets (exact up to `MAX_EXACT_N`
-   active people; greedy fallback above that). Each atomic subgroup then settles
-   with exactly `size−1` edges = a spanning tree; each tree edge's amount and
-   direction are fully determined by the subtree balance sum.
-2. **Fewest pass-through nodes**: among all spanning trees, prefer ones with the
-   fewest nodes that have *both* an incoming and an outgoing edge (a node that is
-   just a money proxy, e.g. `A→B→C`). We'd rather `A→B, A→C`.
-3. **Largest minimum transfer**: tie-break by maximizing the smallest edge amount.
-   Enumerated over all spanning trees via Prüfer sequences (up to `MAX_TREE_S`);
-   `treeAmounts` returns `{detailed, minAmt, passThrough}` and `bestSpanningTree`
-   selects lexicographically (passThrough asc, then minAmt desc).
+## Data flow (`load` → `applyCsv` → `showDataset`)
+- Sheet is the pubhtml URL, entered in the **Input** tab; remembered in
+  `localStorage[STORE_KEY]`. First run uses `DEMO`. **No URL params.**
+- pubhtml → CSV via `toCsvUrl` (`/pub?...&output=csv`); Google sends
+  `Access-Control-Allow-Origin: *` so we fetch directly (no proxy).
+  - `file://` (null origin) is blocked by browsers → must serve over http(s); the
+    error banner says so. (Can't test CORS in the sandbox — no network for Bash.)
+- **Caching = stale-while-revalidate** (`load`): render cached CSV
+  (`localStorage['iou_csv:'+csvUrl]`) instantly, then fetch fresh and re-render only
+  if the string differs; on network error with a cache, keep the cached view.
+  Sheet title cached the same way (`iou_title:`+db). Selected column preserved when
+  data is unchanged.
+- Parsing (`applyCsv`): col 0 = name; every later column **with a header label**
+  (e.g. `Current`, `All Time`, dates) is a selectable dataset → segmented toggle in
+  Balances that re-drives table + graph. Labels come from the sheet header (change
+  there, not in code). Blank/non-numeric cell = `0`; `Total` row skipped. No labels
+  (old format) → single `Balance` column, no toggle.
+- Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
+  else error + no graph.
 
-## Dependencies (pinned CDNs, inline in `index.html`)
-- `d3@7.9.0` — DOM/selection, colors, interactivity.
-- `@hpcc-js/wasm@2.34.2` — Graphviz WASM engine.
-- `d3-graphviz@5.6.0` — renders **DOT → SVG** (this is the DOT rendering library).
-- `papaparse@5.5.4` — CSV parsing.
+## Algorithm (`computeTransfers`) — strict lexicographic objective
+1. **Fewest transfers** = `n − k`, `k` = max disjoint zero-sum subgroups (bitmask DP,
+   exact ≤ `MAX_EXACT_N`, greedy above). Each atomic subgroup settles as a spanning
+   tree (`size−1` edges); each edge's amount+direction is fixed by its subtree sum.
+2. **Fewest pass-through nodes** (have both in- and out-edge, i.e. money proxies).
+3. **Largest minimum transfer** (tie-break).
+   `bestSpanningTree` enumerates all spanning trees via Prüfer sequences (≤
+   `MAX_TREE_S`); `treeAmounts` returns `{detailed, minAmt, passThrough}`; selection
+   is (passThrough asc, then minAmt desc).
 
-## UI
-- **Balances** card with tabs: **Balances** (pretty table; each name has a
-  deterministic Tableau10 color shown as a dot) and **Input** (URL field + Load
-  button + Open link + the live sheet `<iframe>`).
-- **Transfers** card with tabs: **Graph** (DOT digraph via d3-graphviz) and
-  **DOT** (the raw DOT source). Clicking a table row or a graph node highlights
-  the matching node. There is no textual transfer list — the graph is it.
-- Page heading + `document.title` use the sheet's name, read best-effort from the
-  pubhtml `<title>` (`fetchSheetTitle`, strips the `- Google Drive`/`Sheets`
-  suffix). Separate fetch from the CSV; may be CORS-blocked → falls back to
-  "Group IOU". Non-blocking, never delays the data render.
-- Minimal chrome: no success banner, no Net row (net is only checked internally).
-- Mobile-friendly: responsive layout, scrollable table, fluid SVG.
+## UI specifics
+- Two cards, tabbed: **Balances** (table + dataset toggle) / **Input** (URL + iframe);
+  **Transfers** (Graph / raw DOT). No textual transfer list — graph only.
+- Node label = name + balance (HTML-like DOT label, amount at `POINT-SIZE 8`).
+- Click row or node → highlight that node + its edges + neighbors, dim the rest
+  (`applyGraphSelection`, `selecting`/`keep`/`hl` classes; edges get DOT `id=edge-N`).
+  Click graph blank space → `clearSelection`. Colors keyed by row index (stable
+  across columns).
+- Heading = sheet name (`fetchSheetTitle`, best-effort, may be CORS-blocked →
+  "Group IOU"); heading links to the sheet; GitHub icon top-right.
 
-## Deploy
-- `.github/workflows/deploy.yml` uses the official Pages flow
-  (`configure-pages` → `upload-pages-artifact` → `deploy-pages`) on push to `main`.
-- **Repo setting required:** Settings → Pages → Source = **GitHub Actions**.
-- Remote: `https://github.com/pathikrit/group_iou`.
-
-## Local testing
-- Serve over HTTP (not `file://`, which breaks fetch/CORS):
-  `python3 -m http.server` then open `http://localhost:8000/`.
+## Deploy / test
+- `deploy.yml`: official Pages flow on push to `main`. **Repo setting:** Settings →
+  Pages → Source = **GitHub Actions**. Remote: `github.com/pathikrit/group_iou`.
+- Local: `python3 -m http.server` → `http://localhost:8000/` (not `file://`).
+- Sanity after JS edits: extract last `<script>` and `node --check` it.

@@ -104,8 +104,19 @@
 
   @media (max-width:560px){
     .wrap{padding:14px 12px 56px}
-    header h1{font-size:1.3rem}
-    th,td{padding:9px 10px}
+    header h1{font-size:1.7rem}
+    /* bigger, more tappable tabs + dataset toggle */
+    .tab{font-size:1.05rem;padding:11px 16px}
+    .seg{font-size:1rem;padding:10px 16px}
+    /* roomier, more legible balances table */
+    th,td{padding:14px 12px}
+    th{font-size:.9rem}
+    .name{font-size:1.1rem}
+    td.amt{font-size:1.15rem}
+    .dot{width:14px;height:14px;margin-right:11px}
+    /* taller graph + larger DOT text */
+    #graph{min-height:300px}
+    #dotSource{font-size:.85rem}
   }
 </style>
 </head>
@@ -419,6 +430,7 @@ function greedyTree(g){
 }
 
 /* ===================== RENDERING ===================== */
+const MOBILE_MQ = window.matchMedia('(max-width: 560px)');   // mobile = stacked graph
 let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
@@ -428,8 +440,11 @@ let selectedDataset = 0;
 
 function buildDot(transfers){
   const fontname = "Helvetica,Arial,sans-serif";
+  // top-to-bottom on phones so the graph fills the tall screen (and scales up,
+  // rather than a wide left-to-right graph shrinking to fit the narrow width)
+  const rankdir = MOBILE_MQ.matches ? 'TB' : 'LR';
   let dot = 'digraph G {\n';
-  dot += '  bgcolor="transparent"; rankdir=LR; pad=0.2; nodesep=0.5; ranksep=0.8;\n';
+  dot += `  bgcolor="transparent"; rankdir=${rankdir}; pad=0.2; nodesep=0.5; ranksep=0.8;\n`;
   dot += `  node [shape=circle, style="filled", fontname="${fontname}", fontsize=14, penwidth=2, color="#0b0d11", margin=0.08];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
   for(const p of people){
@@ -546,26 +561,43 @@ function setStatus(kind, msg){
 
 /* ===================== MAIN ===================== */
 // Fetch + render a sheet. No URL params — the sheet comes from the UI / storage.
+// Stale-while-revalidate: render the cached copy instantly, then fetch fresh in
+// the background and re-render only if the CSV actually changed.
 async function load(db){
   people = [];
   activeNode = null;
   document.getElementById('settleCard').classList.add('hidden');
-  setStatus('info', 'Loading sheet…');
 
   // reflect the current source in the Input tab + make the title link to the sheet
   document.getElementById('dbInput').value = db;
   document.getElementById('appTitle').href = db;
   document.getElementById('srcFrame').src = db;
 
-  // best-effort: use the sheet's name as the page title (non-blocking)
-  setTitle(null);
-  fetchSheetTitle(db).then(t => { if(t) setTitle(t); });
+  const csvUrl  = toCsvUrl(db);
+  const csvKey  = 'iou_csv:' + csvUrl;
+  let cached = null;
+  try { cached = localStorage.getItem(csvKey); } catch(e) {}
 
-  let rows;
+  // title: show cached name instantly, then refresh in the background
+  const titleKey = 'iou_title:' + db;
+  let cachedTitle = null;
+  try { cachedTitle = localStorage.getItem(titleKey); } catch(e) {}
+  setTitle(cachedTitle);
+  fetchSheetTitle(db).then(t => {
+    if(t){ setTitle(t); try { localStorage.setItem(titleKey, t); } catch(e) {} }
+  });
+
+  // 1) instant render from cache (if any)
+  let shownFromCache = false;
+  if(cached) shownFromCache = applyCsv(cached);
+  else setStatus('info', 'Loading sheet…');
+
+  // 2) revalidate against the live sheet
+  let fresh;
   try{
-    const text = await fetchSheetCsv(toCsvUrl(db));
-    rows = Papa.parse(text, { skipEmptyLines: true }).data;
+    fresh = await fetchSheetCsv(csvUrl);
   }catch(e){
+    if(shownFromCache) return;   // keep the cached view; ignore transient network errors
     const fileHint = location.protocol === 'file:'
       ? ' You are opening this file directly (file://), which browsers block from fetching. ' +
         'Serve it over http — e.g. <code>python3 -m http.server</code> then open ' +
@@ -577,38 +609,52 @@ async function load(db){
     return;
   }
 
+  // 3) re-render only if the content changed
+  if(fresh !== cached){
+    try { localStorage.setItem(csvKey, fresh); } catch(e) {}
+    applyCsv(fresh);
+  }
+}
+
+// Parse CSV text into datasets + people and render. Returns false if no usable rows.
+function applyCsv(text){
+  const rows = Papa.parse(text, { skipEmptyLines: true }).data;
+
   // Column 0 = name. Each later column with a header label is a selectable
   // dataset (e.g. "Current", "All Time", dated snapshots).
   const header = rows[0] || [];
-  datasets = [];
+  const ds = [];
   for(let c = 1; c < header.length; c++){
     const lbl = (header[c] == null ? '' : String(header[c])).trim();
-    if(lbl) datasets.push({ label: lbl, col: c });
+    if(lbl) ds.push({ label: lbl, col: c });
   }
   let dataRows = rows.slice(1);
-  if(!datasets.length){            // no header labels (old format): single column
-    datasets = [{ label: 'Balance', col: 1 }];
+  if(!ds.length){                  // no header labels (old format): single column
+    ds.push({ label: 'Balance', col: 1 });
     dataRows = rows;
   }
 
   // one person per row, with a value per dataset column ('' / non-numeric -> 0)
-  rawPeople = [];
+  const rp = [];
   for(const r of dataRows){
     const name = (r[0] == null ? '' : String(r[0])).trim();
     if(!name || name.toLowerCase() === 'total') continue;
-    if(!datasets.some(d => !isNaN(parseAmount(r[d.col])))) continue;   // no numbers -> skip
-    const values = datasets.map(d => { const v = parseAmount(r[d.col]); return isNaN(v) ? 0 : round2(v); });
-    rawPeople.push({ name, values });
+    if(!ds.some(d => !isNaN(parseAmount(r[d.col])))) continue;   // no numbers -> skip
+    const values = ds.map(d => { const v = parseAmount(r[d.col]); return isNaN(v) ? 0 : round2(v); });
+    rp.push({ name, values });
   }
 
-  if(!rawPeople.length){
+  if(!rp.length){
     setStatus('error', 'No <code>name, balance</code> rows found in the sheet. Expected the first column to be a name and later columns to be balances.');
-    return;
+    return false;
   }
 
-  selectedDataset = 0;
+  datasets = ds;
+  rawPeople = rp;
+  if(selectedDataset >= datasets.length) selectedDataset = 0;   // keep the user's column if possible
   renderDatasetToggle();
-  showDataset(0);
+  showDataset(selectedDataset);
+  return true;
 }
 
 // Build `people` from the chosen column, then render the table + graph.
@@ -653,6 +699,8 @@ function main(){
   document.getElementById('graph').addEventListener('click', e => {
     if(!e.target.closest('g.node')) clearSelection();
   });
+  // re-render the graph when crossing the mobile breakpoint (LR <-> TB)
+  MOBILE_MQ.addEventListener('change', () => { if(people.length) renderGraph(currentTransfers); });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
     if(!v) return;
