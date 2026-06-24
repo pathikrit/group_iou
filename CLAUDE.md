@@ -36,13 +36,29 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   if the string differs; on network error with a cache, keep the cached view.
   Sheet title cached the same way (`iou_title:`+db). Selected column preserved when
   data is unchanged.
-- Parsing (`applyCsv`): col 0 = name; every later column **with a header label**
-  (e.g. `Current`, `All Time`, dates) is a selectable dataset → segmented toggle in
-  Balances that re-drives table + graph. Labels come from the sheet header (change
-  there, not in code). Blank/non-numeric cell = `0`; `Total` row skipped. No labels
-  (old format) → single `Balance` column, no toggle.
+- Parsing (`applyCsv`): the sheet may stack **two tables** in one tab — a balances
+  block on top, then a settlement **ledger** whose header row is
+  `From, To, Date, Amount` (blank separator rows are already dropped by
+  `skipEmptyLines`). Split at the first `from`/`to` header row; everything above =
+  balances, below = ledger.
+  - Balances block: col 0 = name; every later column **with a header label**
+    (dated snapshots like `9-Jun`) is a dataset. Labels come from the sheet header
+    (change there, not in code). Blank/non-numeric cell = `null` (absent that
+    column → hidden); `Total` row skipped. No labels (old format) → single
+    `Balance` column, no toggle.
+  - Ledger → `transactions` `[{from, to, date, amount}]`. **When a ledger exists**,
+    two **virtual datasets are prepended**: **`All Time`** = per-person sum of the
+    dated columns (base owed, ignoring settlements), and **`Current`** = All Time
+    after applying the ledger (each transfer: payer `+amount`, payee `−amount`) =
+    what's still outstanding. Both are unshifted onto every
+    `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged;
+    `Current` is the default selected column. A name only in the ledger (not in any
+    dated column) still gets a row (`All Time` = 0). Toggle order:
+    `Current | All Time | <dates…>`. No ledger → legacy behavior (no computed
+    columns, no Transactions tab).
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
-  else error + no graph.
+  else error + no graph. (Both base and ledger are net-zero, so `Current`/`All Time`
+  stay net-zero.)
 
 ## Algorithm (`computeTransfers`) — three constraints, applied strictly in order
 The code MUST follow these exactly; keep the matching comment in `computeTransfers`.
@@ -65,7 +81,10 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 (proxies asc, then minAmt desc).
 
 ## UI specifics
-- **Balances** card is tabbed: **Balances** (table + dataset toggle) / **Input**
+- **Balances** card is tabbed: **Balances** (table + dataset toggle) /
+  **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
+  `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
+  `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
   (URL + iframe). **Transfers** card just shows the graph (no tabs); the raw DOT is
   behind a little ⓘ button (`#dotToggle`) at the graph box's bottom-right, which
   toggles a `#dotSource` overlay. No textual transfer list — graph only.

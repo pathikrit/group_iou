@@ -68,6 +68,9 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-bal" data-bs-toggle="tab" data-bs-target="#pane-bal" type="button" role="tab">Balances</button>
         </li>
+        <li class="nav-item d-none" id="txnTab" role="presentation">
+          <button class="nav-link" id="tab-txn" data-bs-toggle="tab" data-bs-target="#pane-txn" type="button" role="tab">Transactions</button>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-input" data-bs-toggle="tab" data-bs-target="#pane-input" type="button" role="tab">Input</button>
         </li>
@@ -76,6 +79,9 @@
         <div class="tab-pane fade show active" id="pane-bal" role="tabpanel">
           <div id="dsToggle" class="d-flex flex-wrap gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
           <table id="balTable"></table>
+        </div>
+        <div class="tab-pane fade" id="pane-txn" role="tabpanel">
+          <table id="txnTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-input" role="tabpanel">
           <div class="input-group input-group-lg mb-3">
@@ -409,8 +415,21 @@ let people = [];          // [{name, balance, idx, color, nodeId}] for the selec
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
-let datasets = [];           // [{label, col}] named value columns from the header
+let datasets = [];           // [{label, col?}] value columns (incl. virtual Current/All Time)
 let selectedDataset = 0;
+let transactions = [];       // [{from, to, date, amount}] parsed settlement ledger (if any)
+
+// Stable color for a person by name, keyed off their rawPeople index (same scheme
+// as colorFor/nodeId) so chips/nodes match across the Balances table, the
+// Transactions table and the graph. Unknown name -> neutral gray.
+function colorForName(name){
+  const i = rawPeople.findIndex(p => p.name === name);
+  return i < 0 ? '#6c757d' : colorFor(i);
+}
+function nameChip(name){
+  const bg = colorForName(name);
+  return `<span class="badge" style="background-color:${bg};color:${textOn(bg)}">${escapeHtml(name)}</span>`;
+}
 
 function buildDot(transfers){
   const fontname = "Helvetica,Arial,sans-serif";
@@ -538,6 +557,27 @@ function renderTable(){
   document.getElementById('tableCard').classList.remove('d-none');
 }
 
+// Transactions ledger table (second bootstrap-table). Name chips reuse the
+// per-person colors so they match the Balances table + graph nodes.
+function initTxnTable(){
+  $('#txnTable').bootstrapTable({
+    classes: 'table align-middle m-0',
+    columns: [
+      { field: 'from', title: 'From', sortable: true, formatter: nameChip },
+      { field: 'to',   title: 'To',   sortable: true, formatter: nameChip },
+      { field: 'date', title: 'Date', sortable: true, class: 'text-secondary' },
+      { field: 'amount', title: 'Amount', align: 'right', valign: 'middle', sortable: true,
+        sorter: (a, b) => a - b,
+        formatter: v => `<span class="fw-bold">${moneyWhole(v)}</span>` }
+    ]
+  });
+}
+
+function renderTxnTable(){
+  document.getElementById('txnTab').classList.toggle('d-none', !transactions.length);
+  $('#txnTable').bootstrapTable('load', transactions.map(t => ({ from: t.from, to: t.to, date: t.date, amount: t.amount })));
+}
+
 // Reflect the current selection on the table rows.
 function highlightTable(){
   document.querySelectorAll('#balTable tbody tr').forEach(tr =>
@@ -620,24 +660,34 @@ async function load(db){
 function applyCsv(text){
   const rows = Papa.parse(text, { skipEmptyLines: true }).data;
 
+  // The sheet may stack two tables (blank separators already dropped by
+  // skipEmptyLines): a balances block on top, then a settlement ledger whose
+  // header is "From, To, Date, Amount". Split at that header if present.
+  const isLedgerHeader = r =>
+    String((r && r[0]) || '').trim().toLowerCase() === 'from' &&
+    String((r && r[1]) || '').trim().toLowerCase() === 'to';
+  const ledgerAt = rows.findIndex(isLedgerHeader);
+  const balanceRows = ledgerAt >= 0 ? rows.slice(0, ledgerAt) : rows;
+  const ledgerRows  = ledgerAt >= 0 ? rows.slice(ledgerAt + 1) : [];
+
   // Column 0 = name. Each later column with a header label is a selectable
-  // dataset (e.g. "Current", "All Time", dated snapshots).
-  const header = rows[0] || [];
+  // dated dataset (e.g. dated snapshots like "9-Jun").
+  const header = balanceRows[0] || [];
   const ds = [];
   for(let c = 1; c < header.length; c++){
     const lbl = (header[c] == null ? '' : String(header[c])).trim();
     if(lbl) ds.push({ label: lbl, col: c });
   }
-  let dataRows = rows.slice(1);
+  let dataRows = balanceRows.slice(1);
   if(!ds.length){                  // no header labels (old format): single column
     ds.push({ label: 'Balance', col: 1 });
-    dataRows = rows;
+    dataRows = balanceRows;
   }
 
-  // One person per row, value per dataset column. A number (incl. explicit 0 =
-  // "played, evened out") means present; an EMPTY cell means absent that column
-  // and is stored as null so it can be hidden. Rows with no data anywhere, and
-  // nameless / Total rows, are skipped.
+  // One person per row, value per dated dataset column. A number (incl. explicit
+  // 0 = "played, evened out") means present; an EMPTY cell means absent that
+  // column and is stored as null so it can be hidden. Rows with no data anywhere,
+  // and nameless / Total rows, are skipped.
   const rp = [];
   for(const r of dataRows){
     const name = (r[0] == null ? '' : String(r[0])).trim();
@@ -652,10 +702,41 @@ function applyCsv(text){
     return false;
   }
 
+  // Parse the ledger (if any) into {from, to, date, amount}.
+  const txns = [];
+  for(const r of ledgerRows){
+    const from = (r[0] == null ? '' : String(r[0])).trim();
+    const to   = (r[1] == null ? '' : String(r[1])).trim();
+    const amount = parseAmount(r[3]);
+    if(!from || !to || isNaN(amount)) continue;
+    txns.push({ from, to, date: (r[2] == null ? '' : String(r[2])).trim(), amount: round2(amount) });
+  }
+
+  // When a ledger exists, prepend two virtual datasets — "All Time" (base owed,
+  // = sum of the dated columns) and "Current" (All Time after applying the
+  // ledger: payer +amount, payee -amount). Each person's value array gets the two
+  // computed values unshifted so the index-based showDataset() needs no changes.
+  if(txns.length){
+    // a name only in the ledger (not in any dated column) still gets a row
+    for(const t of txns) for(const nm of [t.from, t.to]){
+      if(!rp.some(p => p.name === nm)) rp.push({ name: nm, values: ds.map(() => null) });
+    }
+    const allTime = new Map(rp.map(p => [p.name, p.values.reduce((s, v) => s + (v || 0), 0)]));
+    const current = new Map(allTime);
+    for(const t of txns){
+      if(current.has(t.from)) current.set(t.from, current.get(t.from) + t.amount);
+      if(current.has(t.to))   current.set(t.to,   current.get(t.to)   - t.amount);
+    }
+    for(const p of rp) p.values.unshift(round2(current.get(p.name)), round2(allTime.get(p.name)));
+    ds.unshift({ label: 'Current' }, { label: 'All Time' });
+  }
+
   datasets = ds;
   rawPeople = rp;
+  transactions = txns;
   if(selectedDataset >= datasets.length) selectedDataset = 0;   // keep the user's column if possible
   renderDatasetToggle();
+  renderTxnTable();
   showDataset(selectedDataset);
   return true;
 }
@@ -710,6 +791,7 @@ function renderDatasetToggle(){
 
 function main(){
   initBalTable();
+  initTxnTable();
   // clicking empty space in the graph (not a node) clears the selection
   document.getElementById('graph').addEventListener('click', e => {
     if(!e.target.closest('g.node')) clearSelection();
