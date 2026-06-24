@@ -31,8 +31,8 @@
   #pane-txn .fixed-table-body{max-height:32rem;overflow:auto}
   #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
-  /* graph (Graphviz SVG internals — no Bootstrap equivalent) */
-  #graph{min-height:160px}
+  /* graph (Graphviz SVG internals — no Bootstrap equivalent). The SVG drives its
+     own height (height:auto, scaled to fit width), so no hardcoded min-height. */
   #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
@@ -44,7 +44,6 @@
 
   @media (max-width:768px){
     #pane-txn .fixed-table-body{max-height:60vh}
-    #graph{min-height:320px}
   }
 </style>
 </head>
@@ -548,7 +547,7 @@ function initBalTable(){
     classes: 'table align-middle m-0',
     columns: [
       { field: 'rank', title: '#', align: 'center', valign: 'middle', sortable: true, class: 'text-secondary' },
-      { field: 'name', title: 'Name', sortable: true, widthUnit: '%', width: 100,
+      { field: 'name', title: 'Name', sortable: true,
         formatter: (v, row) =>
           `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' ' + row.medal : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
