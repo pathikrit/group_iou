@@ -48,16 +48,18 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
     `Balance` column, no toggle.
   - Ledger → `transactions` `[{from, to, date, amount}]`. **When a ledger exists**,
     two **virtual datasets are prepended**: **`All Time`** = per-person sum of the
-    dated columns (base owed, ignoring settlements), and **`Current`** = All Time
+    dated columns (base owed, ignoring settlements), and **`IOU`** = All Time
     after applying the ledger (each transfer: payer `+amount`, payee `−amount`) =
     what's still outstanding. Both are unshifted onto every
-    `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged;
-    `Current` is the default selected column. A name only in the ledger (not in any
-    dated column) still gets a row (`All Time` = 0). Toggle order:
-    `Current | All Time | <dates…>`. No ledger → legacy behavior (no computed
-    columns, no Transactions tab).
+    `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged.
+    **`All Time` is the default selected column** until the user clicks a pill
+    (`userPicked` flag; then their choice persists across revalidation). A name
+    only in the ledger (not in any dated column) still gets a row (`All Time` = 0).
+    Toggle order: `IOU | All Time | <dates…>` (`IOU`/`All Time` render as larger
+    CTA pills). No ledger → legacy behavior (no computed columns, no Transactions
+    tab).
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
-  else error + no graph. (Both base and ledger are net-zero, so `Current`/`All Time`
+  else error + no graph. (Both base and ledger are net-zero, so `IOU`/`All Time`
   stay net-zero.)
 
 ## Algorithm (`computeTransfers`) — three constraints, applied strictly in order
@@ -112,6 +114,17 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   across columns).
 - Heading = sheet name (`fetchSheetTitle`, best-effort, may be CORS-blocked →
   "Group IOU"); heading links to the sheet; GitHub icon top-right.
+
+## TODO / future ideas
+- **Link heading to the editable sheet when possible.** Today `appTitle.href = db`
+  (the pubhtml URL). For a *normal* `/spreadsheets/d/<ID>/…` link we could extract
+  `<ID>` (regex `/spreadsheets/d/(?!e/)<ID>/`) and point the heading at
+  `…/d/<ID>/edit#gid=<gid>`. NOT derivable for the "publish to web"
+  `/d/e/2PACX-1v…/pubhtml` form (incl. the DEMO): that `2PACX-1v…` token is an
+  opaque, one-way publish ID with no client-side mapping to the real doc ID — so
+  for publish-form links keep linking to the published view. (Going further would
+  mean accepting `/d/<ID>/` URLs as a data source via `export?format=csv`/`gviz`,
+  but those have flakier CORS than `pub?output=csv` and need link-sharing.)
 
 ## Deploy / test
 - `deploy.yml`: official Pages flow on push to `main`. **Repo setting:** Settings →

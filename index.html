@@ -25,7 +25,7 @@
   .nav-tabs .nav-link{color:var(--bs-secondary-color)}
   .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
-  /* dataset toggle pills — dated snapshots; CTA pills (Current/All Time) bigger */
+  /* dataset toggle pills — dated snapshots; CTA pills (IOU/All Time) bigger */
   #dsToggle{align-items:center}
   #dsToggle .btn{font-size:1.05rem;padding:.4rem 1.1rem}
   #dsToggle .ds-cta{font-size:1.35rem;padding:.55rem 1.6rem;font-weight:600}
@@ -425,8 +425,9 @@ let currentTransfers = [];   // [{from, to, amount}] currently drawn
 let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
-let datasets = [];           // [{label, col?}] value columns (incl. virtual Current/All Time)
+let datasets = [];           // [{label, col?}] value columns (incl. virtual IOU/All Time)
 let selectedDataset = 0;
+let userPicked = false;      // true once the user clicks a dataset pill (stops default override)
 let transactions = [];       // [{from, to, date, amount}] parsed settlement ledger (if any)
 
 // Stable color for a person by name, keyed off their rawPeople index (same scheme
@@ -555,7 +556,8 @@ function initBalTable(){
     columns: [
       { field: 'rank', title: '#', align: 'center', valign: 'middle', sortable: true, class: 'text-secondary' },
       { field: 'name', title: 'Name', sortable: true, widthUnit: '%', width: 100,
-        formatter: (v, row) => `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>` },
+        formatter: (v, row) =>
+          `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' ' + row.medal : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
         sorter: (a, b) => a - b,
         formatter: v => {
@@ -570,8 +572,56 @@ function initBalTable(){
   });
 }
 
+// Rank medal for the balances table: 🥇 #1, 🥈 #2, 💩 last. people is sorted by
+// balance desc, so the row index is the rank. (Same count thresholds as the graph
+// emojis so tiny groups don't get nonsensical medals.)
+function tableMedal(rank, count){
+  if(count >= 2 && rank === 0) return '🥇';
+  if(count >= 3 && rank === 1) return '🥈';
+  if(count >= 2 && rank === count - 1) return '💩';
+  return '';
+}
+
+// Medals earned per person in one dated column (name -> medal char). Mirrors how
+// showDataset builds `people`: present people only, sorted by balance desc.
+function columnMedals(colIdx){
+  const list = [];
+  rawPeople.forEach(rp => { const v = rp.values[colIdx]; if(v != null) list.push({ name: rp.name, balance: v }); });
+  list.sort((a, b) => b.balance - a.balance);
+  const m = new Map();
+  list.forEach((p, i) => { const md = tableMedal(i, list.length); if(md) m.set(p.name, md); });
+  return m;
+}
+
+// All medals each person accumulated across the dated columns (every dataset with a
+// source col — i.e. not the virtual IOU/All Time), sorted 🥇→🥈→💩.
+function accumulatedMedals(){
+  const ORDER = { '🥇': 0, '🥈': 1, '💩': 2 };
+  const acc = new Map();   // name -> [medal chars]
+  datasets.forEach((d, ci) => {
+    if(d.col === undefined) return;
+    for(const [name, md] of columnMedals(ci)){
+      if(!acc.has(name)) acc.set(name, []);
+      acc.get(name).push(md);
+    }
+  });
+  const out = new Map();
+  for(const [name, arr] of acc){ arr.sort((a, b) => ORDER[a] - ORDER[b]); out.set(name, arr.join('')); }
+  return out;
+}
+
 function renderTable(){
-  const rows = people.map((p, i) => ({ rank: i + 1, name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId }));
+  const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
+  const n = people.length;
+  // All Time accumulates medals from every dated column; other columns (not IOU)
+  // get their own 🥇/🥈/💩; IOU (current outstanding) gets none.
+  const acc = label === 'All Time' ? accumulatedMedals() : null;
+  const rows = people.map((p, i) => {
+    let medal = '';
+    if(label === 'All Time') medal = acc.get(p.name) || '';
+    else if(label !== 'IOU') medal = tableMedal(i, n);
+    return { rank: i + 1, name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
+  });
   $('#balTable').bootstrapTable('load', rows);
   document.getElementById('tableCard').classList.remove('d-none');
 }
@@ -732,7 +782,7 @@ function applyCsv(text){
   }
 
   // When a ledger exists, prepend two virtual datasets — "All Time" (base owed,
-  // = sum of the dated columns) and "Current" (All Time after applying the
+  // = sum of the dated columns) and "IOU" (All Time after applying the
   // ledger: payer +amount, payee -amount). Each person's value array gets the two
   // computed values unshifted so the index-based showDataset() needs no changes.
   if(txns.length){
@@ -747,13 +797,18 @@ function applyCsv(text){
       if(current.has(t.to))   current.set(t.to,   current.get(t.to)   - t.amount);
     }
     for(const p of rp) p.values.unshift(round2(current.get(p.name)), round2(allTime.get(p.name)));
-    ds.unshift({ label: 'Current' }, { label: 'All Time' });
+    ds.unshift({ label: 'IOU' }, { label: 'All Time' });
   }
 
   datasets = ds;
   rawPeople = rp;
   transactions = txns;
   if(selectedDataset >= datasets.length) selectedDataset = 0;   // keep the user's column if possible
+  // default to "All Time" until the user picks a pill themselves
+  if(!userPicked){
+    const at = datasets.findIndex(d => d.label === 'All Time');
+    selectedDataset = at >= 0 ? at : 0;
+  }
   renderDatasetToggle();
   renderTxnTable();
   showDataset(selectedDataset);
@@ -847,12 +902,12 @@ function renderDatasetToggle(){
   datasets.forEach((d, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    // computed columns (Current / All Time, no source col) are larger CTA pills;
+    // computed columns (IOU / All Time, no source col) are larger CTA pills;
     // the dated snapshots stay smaller
     const cta = d.col === undefined;
     b.className = 'btn rounded-pill btn-outline-secondary' + (cta ? ' ds-cta' : ' btn-sm');
     b.textContent = d.label;
-    b.addEventListener('click', () => showDataset(i));
+    b.addEventListener('click', () => { userPicked = true; showDataset(i); });
     el.appendChild(b);
   });
 }
