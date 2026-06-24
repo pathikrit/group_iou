@@ -562,6 +562,14 @@ function initBalTable(){
         formatter: v => {
           const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
           return `<span class="fw-bold ${c}">${moneyWhole(v)}</span>`;
+        } },
+      // Average = balance ÷ times seen; shown only for the All Time column (see renderTable)
+      { field: 'average', title: 'Average', align: 'right', valign: 'middle', sortable: true, visible: false,
+        sorter: (a, b) => a - b,
+        formatter: v => {
+          if(v == null) return '';
+          const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
+          return `<span class="fw-bold ${c}">${moneyWhole(v)}</span>`;   // nearest dollar, no cents
         } }
     ],
     sortName: 'amount', sortOrder: 'desc',
@@ -619,19 +627,49 @@ function accumulatedMedals(){
   return out;
 }
 
+// How many dated columns this person actually appears in (non-empty cell).
+function seenCount(rawIdx){
+  let n = 0;
+  datasets.forEach((d, i) => { if(d.col !== undefined && rawPeople[rawIdx].values[i] != null) n++; });
+  return n;
+}
+
 function renderTable(){
   const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
   const n = people.length;
-  // All Time accumulates medals from every dated column; other columns (not IOU)
-  // get their own 🥇/🥈/💩; IOU (current outstanding) gets none.
-  const acc = label === 'All Time' ? accumulatedMedals() : null;
+  // All Time accumulates medals from every dated column + shows an Average column
+  // (balance ÷ times seen); other columns (not IOU) get their own 🥇/🥈/💩.
+  const isAllTime = label === 'All Time';
+  const acc = isAllTime ? accumulatedMedals() : null;
+
+  // Averages (computed once) + the top average gets a 👑 (suffixed first). All Time
+  // is sorted by average desc, so its # rank follows average order too.
+  let avg = null, crowned = new Set(), rankByName = null;
+  if(isAllTime){
+    avg = new Map(people.map(p => { const s = seenCount(p.idx); return [p.name, s ? p.balance / s : 0]; }));
+    if(people.length >= 2){
+      const max = Math.max(...avg.values());
+      people.forEach(p => { if(avg.get(p.name) === max) crowned.add(p.name); });
+    }
+    const order = [...people].sort((a, b) => avg.get(b.name) - avg.get(a.name));
+    rankByName = new Map(order.map((p, i) => [p.name, i + 1]));
+  }
+
   const rows = people.map((p, i) => {
     let medal = '';
-    if(label === 'All Time') medal = acc.get(p.name) || '';
-    else if(label !== 'IOU') medal = tableMedal(i, n);
-    return { rank: i + 1, name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
+    if(isAllTime){
+      medal = acc.get(p.name) || '';
+      if(crowned.has(p.name)) medal = '👑' + medal;   // crown first in the suffix
+    }else if(label !== 'IOUs') medal = tableMedal(i, n);
+    const row = { rank: isAllTime ? rankByName.get(p.name) : i + 1,
+      name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
+    if(isAllTime) row.average = avg.get(p.name);
+    return row;
   });
   $('#balTable').bootstrapTable('load', rows);
+  $('#balTable').bootstrapTable(isAllTime ? 'showColumn' : 'hideColumn', 'average');
+  $('#balTable').bootstrapTable('sortBy', isAllTime
+    ? { field: 'average', sortOrder: 'desc' } : { field: 'amount', sortOrder: 'desc' });
   document.getElementById('tableCard').classList.remove('d-none');
 }
 
@@ -813,7 +851,7 @@ function applyCsv(text){
   }
 
   // When a ledger exists, prepend two virtual datasets — "All Time" (base owed,
-  // = sum of the dated columns) and "IOU" (All Time after applying the
+  // = sum of the dated columns) and "IOUs" (All Time after applying the
   // ledger: payer +amount, payee -amount). Each person's value array gets the two
   // computed values unshifted so the index-based showDataset() needs no changes.
   if(txns.length){
@@ -828,7 +866,7 @@ function applyCsv(text){
       if(current.has(t.to))   current.set(t.to,   current.get(t.to)   - t.amount);
     }
     for(const p of rp) p.values.unshift(round2(current.get(p.name)), round2(allTime.get(p.name)));
-    ds.unshift({ label: 'IOU' }, { label: 'All Time' });
+    ds.unshift({ label: 'IOUs' }, { label: 'All Time' });
   }
 
   datasets = ds;
