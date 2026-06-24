@@ -53,6 +53,7 @@
   th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
   td.amt{text-align:right;font-weight:600}
   td.amt.pos{color:var(--pos)} td.amt.neg{color:var(--neg)} td.amt.zero{color:var(--muted)}
+  .rank{color:var(--muted);text-align:right;width:1%;white-space:nowrap;font-variant-numeric:tabular-nums}
   tr.person{cursor:pointer;transition:background .15s}
   tr.person:hover{background:var(--panel2)}
   tr.person.active{background:#22304a}
@@ -141,7 +142,7 @@
       <div id="dsToggle" class="seg-toggle hidden"></div>
       <div class="tablewrap">
         <table>
-          <thead><tr><th>Name</th><th id="balHead" style="text-align:right">Balance</th></tr></thead>
+          <thead><tr><th class="rank">#</th><th>Name</th><th id="balHead" style="text-align:right">Balance</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -458,7 +459,7 @@ function buildDot(transfers){
   dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${fontname}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
   for(const p of shown){
-    const lbl = `<${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
+    const lbl = `<${escapeHtml(p.name)}${p.medal ? ' ' + p.medal : ''}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
     dot += `  "${esc(p.name)}" [id="${p.nodeId}", label=${lbl}, fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
   }
   transfers.forEach((t, i) => {
@@ -532,17 +533,18 @@ function clearSelection(){
 function renderTable(){
   const tb = document.getElementById('tbody');
   tb.innerHTML = '';
-  for(const p of people){
+  people.forEach((p, i) => {
     const tr = document.createElement('tr');
     tr.className = 'person';
     tr.dataset.node = p.nodeId;
     const sign = Math.abs(p.balance) <= EPS ? 'zero' : (p.balance < 0 ? 'neg' : 'pos');
     tr.innerHTML =
-      `<td><span class="dot" style="background:${p.color}"></span><span class="name">${escapeHtml(p.name)}</span></td>` +
+      `<td class="rank">${i + 1}</td>` +
+      `<td><span class="dot" style="background:${p.color}"></span><span class="name">${escapeHtml(p.name)}</span>${p.medal ? ' ' + p.medal : ''}</td>` +
       `<td class="amt ${sign}">${moneyWhole(p.balance)}</td>`;
     tr.addEventListener('click', () => selectPerson(p.nodeId));
     tb.appendChild(tr);
-  }
+  });
   document.getElementById('tableCard').classList.remove('hidden');
 }
 
@@ -681,8 +683,14 @@ function showDataset(idx){
   rawPeople.forEach((rp, i) => {
     const v = rp.values[idx];
     if(v == null) return;   // absent this column -> don't show
-    people.push({ name: rp.name, balance: v, idx: i, color: colorFor(i), nodeId: 'node-' + i });
+    people.push({ name: rp.name, balance: v, idx: i, color: colorFor(i), nodeId: 'node-' + i, medal: '' });
   });
+  // sort highest balance first; crown the winner, poop the loser
+  people.sort((a, b) => b.balance - a.balance);
+  if(people.length >= 2){
+    people[0].medal = '👑';
+    people[people.length - 1].medal = '💩';
+  }
   document.querySelectorAll('#dsToggle .seg').forEach((b, i) => b.classList.toggle('active', i === idx));
   document.getElementById('balHead').textContent = datasets[idx].label;
 
