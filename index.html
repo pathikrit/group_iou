@@ -18,16 +18,11 @@
 
 <style>
   /* The only non-Bootstrap CSS: a darker dark palette (via Bootstrap's own CSS
-     variables — its recommended theming hook), the Graphviz SVG internals (no
-     Bootstrap equivalent), and a few responsive font sizes utilities can't do. */
+     variables — its recommended theming hook) and the Graphviz SVG internals (no
+     Bootstrap equivalent). Font sizes are left to Bootstrap defaults. */
   [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
-
-  /* responsive font sizes (bumped on mobile below) */
-  .nav-tabs .nav-link{font-size:1.15rem}
-  #balTable{font-size:1.25rem}
-  #txnTable{font-size:1.15rem}
 
   /* Transactions: ~10 newest rows then scroll, with a sticky header */
   #pane-txn .fixed-table-body{max-height:32rem;overflow:auto}
@@ -45,9 +40,6 @@
   #graph g.edge.keep text{font-weight:700}
 
   @media (max-width:768px){
-    .nav-tabs .nav-link{font-size:1.35rem}
-    #balTable{font-size:1.6rem}
-    #txnTable{font-size:1.4rem}
     #pane-txn .fixed-table-body{max-height:60vh}
     #graph{min-height:240px}
     #graph svg{max-width:100%}     /* fill width so the graph never scrolls the page */

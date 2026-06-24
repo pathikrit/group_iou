@@ -14,9 +14,9 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 - `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
   the tiny `<style>` block is deliberately minimal — a darker palette (via Bootstrap's
   own `--bs-*` CSS variables, its theming hook), the Graphviz SVG internals (no
-  Bootstrap equivalent), and a couple of responsive font-sizes utilities can't
-  express. **Everything else must be Bootstrap components/utilities — do not
-  hand-roll CSS or components.**
+  Bootstrap equivalent), and the Transactions scroll/sticky-header + graph
+  min-height/width. **Font sizes are left to Bootstrap defaults; everything else must
+  be Bootstrap components/utilities — do not hand-roll CSS or font sizing.**
 - `bootstrap-table@1.27.3` (+ its CSS) drives the **Balances table** — sortable
   columns (#, Name chip, Balance), init in `initBalTable`, rows loaded in
   `renderTable` via `bootstrapTable('load', …)`. Requires **`jquery@3.7.1`** (load
