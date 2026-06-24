@@ -88,6 +88,14 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   (URL + iframe). **Transfers** card just shows the graph (no tabs); the raw DOT is
   behind a little ⓘ button (`#dotToggle`) at the graph box's bottom-right, which
   toggles a `#dotSource` overlay. No textual transfer list — graph only.
+- **The Transfers graph follows the active tab** (`graphMode`, switched by
+  `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
+  graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on
+  **Transactions** it's the *raw ledger* graph (`renderTxnGraph`/`txnGraphData`) —
+  **no settlement algorithm**, just the ledger grouped by `(from,to)` with summed
+  amounts (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
+  `buildDot`/`applyGraphSelection` operate on `graphNodes` (the nodes currently
+  drawn) so highlight/selection work in both modes.
 - Amounts (balances + transfers) display in **dollars** (`moneyWhole`).
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
   Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where

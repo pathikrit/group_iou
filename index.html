@@ -25,15 +25,16 @@
   .nav-tabs .nav-link{color:var(--bs-secondary-color)}
   .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
-  /* balances table (Bootstrap Table) — selection highlight + chip sizing */
+  /* balances + transactions tables (Bootstrap Table) — selection + chip sizing */
+  #balTable,#txnTable{font-size:1.1rem}    /* slightly larger than default */
   #balTable td{cursor:pointer}
   #balTable tbody tr.table-active{--bs-table-bg-state:rgba(96,165,250,.16)}
-  #balTable .badge{font-size:.95em}        /* chip scales with the table font */
+  #balTable .badge,#txnTable .badge{font-size:.95em}   /* chip scales with the table font */
   .bootstrap-table .fixed-table-container{border:0}
 
   /* graph (SVG internals have no Bootstrap equivalent) */
-  #graph{min-height:160px}
-  #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  #graph{min-height:140px}
+  #graph svg{max-width:85%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -45,8 +46,9 @@
   @media (max-width:768px){
     .nav-link{font-size:1.2rem}
     #dsToggle .btn{font-size:1.05rem}
-    #balTable{font-size:1.25rem}
-    #graph{min-height:320px}
+    #balTable,#txnTable{font-size:1.35rem}
+    #graph{min-height:280px}
+    #graph svg{max-width:100%}            /* fill the narrow screen on mobile */
   }
 </style>
 </head>
@@ -414,6 +416,8 @@ const MOBILE_MQ = window.matchMedia('(max-width: 768px)');   // mobile = stacked
 let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
+let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
+let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual Current/All Time)
 let selectedDataset = 0;
@@ -439,10 +443,12 @@ function buildDot(transfers){
   // one uniform diameter for every node, sized to fit the longest name (so all
   // circles match AND nothing clips). ~0.6em avg glyph; /0.78 to fit a line in a
   // circle; +padding.
-  // Everyone present shows (incl. exact-$0 "evened out" 👻 nodes); only MISSING
-  // people are absent (they're not in `people` at all). $0 nodes have no transfer
-  // edges, so an invisible edge anchors them to the bottom (see below).
-  const shown = people;
+  // 'balances' mode: everyone present shows (incl. exact-$0 "evened out" 👻
+  // nodes); only MISSING people are absent. $0 nodes have no transfer edges, so an
+  // invisible edge anchors them to the bottom (see below).
+  // 'txn' mode: nodes are the ledger participants; labels are name-only (no emoji /
+  // balance line), edges are the aggregated (from,to) sums.
+  const shown = graphNodes;
   const NAME_PT = 14;
   const maxChars = Math.max(3, ...shown.map(p => p.name.length));
   const diameter = Math.max(1.0, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.25).toFixed(2);
@@ -451,18 +457,25 @@ function buildDot(transfers){
   dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${fontname}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
   for(const p of shown){
-    const emojiRow = p.emoji ? `${p.emoji}<BR/>` : '';   // emojis on their own top row
-    const lbl = `<${emojiRow}${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
+    let lbl;
+    if(graphMode === 'balances'){
+      const emojiRow = p.emoji ? `${p.emoji}<BR/>` : '';   // emojis on their own top row
+      lbl = `<${emojiRow}${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
+    }else{
+      lbl = `<${escapeHtml(p.name)}>`;                      // ledger graph: name only
+    }
     dot += `  "${esc(p.name)}" [id="${p.nodeId}", label=${lbl}, fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
   }
   transfers.forEach((t, i) => {
     dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
   });
   // anchor settled ($0) nodes below the flow via an invisible edge from a creditor
-  const zeros = people.filter(p => Math.abs(p.balance) <= EPS);
-  const anchor = people.find(p => p.balance > EPS);
-  if(anchor) for(const z of zeros){
-    dot += `  "${esc(anchor.name)}" -> "${esc(z.name)}" [style=invis];\n`;
+  if(graphMode === 'balances'){
+    const zeros = graphNodes.filter(p => Math.abs(p.balance) <= EPS);
+    const anchor = graphNodes.find(p => p.balance > EPS);
+    if(anchor) for(const z of zeros){
+      dot += `  "${esc(anchor.name)}" -> "${esc(z.name)}" [style=invis];\n`;
+    }
   }
   dot += '}\n';
   return dot;
@@ -483,7 +496,7 @@ function renderGraph(transfers){
     // make rows able to highlight nodes (re-bind because SVG is regenerated)
     d3.selectAll('#graph g.node').style('cursor', 'pointer').on('click', function(){
       const id = this.getAttribute('id');
-      const p = people.find(x => x.nodeId === id);
+      const p = graphNodes.find(x => x.nodeId === id);
       if(p) selectPerson(p.nodeId);
     });
     applyGraphSelection();
@@ -503,7 +516,7 @@ function applyGraphSelection(){
   if(!graph) return;
   d3.selectAll('#graph g.node, #graph g.edge').classed('keep', false).classed('hl', false);
 
-  const sel = activeNode && people.find(p => p.nodeId === activeNode);
+  const sel = activeNode && graphNodes.find(p => p.nodeId === activeNode);
   // no selection, or the selected person isn't in the graph ($0) -> don't dim
   if(!sel || !document.getElementById(activeNode)){ graph.classList.remove('selecting'); return; }
   graph.classList.add('selecting');
@@ -512,7 +525,7 @@ function applyGraphSelection(){
   currentTransfers.forEach((t, i) => {
     if(t.from !== sel.name && t.to !== sel.name) return;
     const otherName = t.from === sel.name ? t.to : t.from;
-    const other = people.find(p => p.name === otherName);
+    const other = graphNodes.find(p => p.name === otherName);
     if(other) keepNodes.add(other.nodeId);
     d3.select('#edge-' + i).classed('keep', true);
   });
@@ -772,7 +785,53 @@ function showDataset(idx){
   }
   setStatus('', '');
   document.getElementById('settleCard').classList.remove('d-none');
+  renderBalGraph();
+}
+
+// Settlement graph for the selected balances column (Constraints 1-3).
+function renderBalGraph(){
+  if(!people.length) return;
+  // mirror showDataset's guard: a non-net-zero column has no settlement graph
+  if(Math.abs(people.reduce((a, p) => a + p.balance, 0)) > EPS){
+    document.getElementById('settleCard').classList.add('d-none');
+    return;
+  }
+  activeNode = null;
+  graphMode = 'balances';
+  graphNodes = people;
+  document.getElementById('settleCard').classList.remove('d-none');
   renderGraph(computeTransfers(people).transfers);
+}
+
+// Raw transfer-ledger graph: no settlement algorithm — just group the ledger by
+// (from, to) and sum the amounts (a dense all-pairs graph is fine). $0 edges omitted.
+function txnGraphData(){
+  const names = [...new Set(transactions.flatMap(t => [t.from, t.to]))];
+  const nodes = names.map(name => ({
+    name, color: colorForName(name), emoji: '',
+    nodeId: 'node-' + rawPeople.findIndex(p => p.name === name)
+  }));
+  const agg = new Map();                       // 'from|to' pair -> {from, to, amount}
+  for(const t of transactions){
+    const k = t.from + '\u0000' + t.to;       // NUL can't appear in a name
+    const e = agg.get(k) || { from: t.from, to: t.to, amount: 0 };
+    e.amount += t.amount;
+    agg.set(k, e);
+  }
+  const edges = [...agg.values()]
+    .filter(e => Math.abs(e.amount) > EPS)      // skip $0 edges
+    .sort((a, b) => b.amount - a.amount);
+  return { nodes, edges };
+}
+
+function renderTxnGraph(){
+  if(!transactions.length) return;
+  activeNode = null;
+  graphMode = 'txn';
+  const { nodes, edges } = txnGraphData();
+  graphNodes = nodes;
+  document.getElementById('settleCard').classList.remove('d-none');
+  renderGraph(edges);
 }
 
 function renderDatasetToggle(){
@@ -797,7 +856,11 @@ function main(){
     if(!e.target.closest('g.node')) clearSelection();
   });
   // re-render the graph when crossing the mobile breakpoint (LR <-> TB)
-  MOBILE_MQ.addEventListener('change', () => { if(people.length) renderGraph(currentTransfers); });
+  MOBILE_MQ.addEventListener('change', () => { if(graphNodes.length) renderGraph(currentTransfers); });
+  // the Transfers graph follows the active tab: Balances -> settlement graph,
+  // Transactions -> raw transfer-ledger graph
+  document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
+  document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderTxnGraph);
   // little (i) button toggles the DOT source overlay over the graph
   document.getElementById('dotToggle').addEventListener('click', () => {
     document.getElementById('dotSource').classList.toggle('d-none');
