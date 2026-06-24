@@ -87,9 +87,8 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
   `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
   `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
-  (URL + iframe). **Transfers** card just shows the graph (no tabs); the raw DOT is
-  behind a little ⓘ button (`#dotToggle`) at the graph box's bottom-right, which
-  toggles a `#dotSource` overlay. No textual transfer list — graph only.
+  (URL + iframe). **Transfers** card just shows the graph (no tabs) — no textual
+  transfer list, graph only.
 - **The Transfers graph follows the active tab** (`graphMode`, switched by
   `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
   graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on

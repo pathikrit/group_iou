@@ -31,7 +31,8 @@
   #dsToggle .ds-cta{font-size:1.15rem;padding:.45rem 1.3rem;font-weight:600}
 
   /* balances + transactions tables (Bootstrap Table) — selection + chip sizing */
-  #balTable,#txnTable{font-size:1.3rem}    /* prominent — this is the main content */
+  #balTable{font-size:1.3rem}    /* prominent — this is the main content */
+  #txnTable{font-size:1.15rem}   /* the ledger is secondary — a touch smaller */
   #balTable td{cursor:pointer}
   #balTable tbody tr.table-active{--bs-table-bg-state:rgba(96,165,250,.16)}
   #balTable .badge,#txnTable .badge{font-size:.95em}   /* chip scales with the table font */
@@ -41,8 +42,8 @@
   #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
   /* graph (SVG internals have no Bootstrap equivalent) — kept compact, table-first */
-  #graph{min-height:110px}
-  #graph svg{max-width:60%;height:auto;display:block;margin:0 auto}
+  #graph{min-height:140px}
+  #graph svg{max-width:74%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -55,10 +56,11 @@
     .nav-tabs .nav-link{font-size:1.35rem}
     #dsToggle .btn{font-size:1.1rem;padding:.45rem 1.15rem}
     #dsToggle .ds-cta{font-size:1.25rem;padding:.5rem 1.3rem}
-    #balTable,#txnTable{font-size:1.7rem}     /* big & legible on phones */
+    #balTable{font-size:1.7rem}     /* big & legible on phones */
+    #txnTable{font-size:1.4rem}     /* ledger a touch smaller */
     #pane-txn .fixed-table-body{max-height:60vh}
-    #graph{min-height:160px}
-    #graph svg{max-width:78%}                  /* much smaller graph on mobile */
+    #graph{min-height:210px}
+    #graph svg{max-width:92%}                  /* smaller than the table, but visible */
   }
 </style>
 </head>
@@ -110,11 +112,7 @@
 
   <div id="settleCard" class="card mb-3 d-none">
     <div class="card-body">
-      <div class="position-relative">
-        <div id="graph" class="overflow-hidden text-center"></div>
-        <pre id="dotSource" class="d-none position-absolute top-0 start-0 w-100 h-100 overflow-auto m-0 p-3 bg-body-tertiary border rounded small font-monospace text-secondary z-2"></pre>
-        <button id="dotToggle" class="btn btn-sm btn-outline-secondary rounded-circle position-absolute bottom-0 end-0 m-2 z-3" aria-label="Show DOT source" title="DOT source">&#9432;</button>
-      </div>
+      <div id="graph" class="overflow-hidden text-center"></div>
     </div>
   </div>
 </div>
@@ -495,7 +493,6 @@ function buildDot(transfers){
 function renderGraph(transfers){
   currentTransfers = transfers;
   const dot = buildDot(transfers);
-  document.getElementById('dotSource').textContent = dot;
   const gv = d3.select('#graph').graphviz({ useWorker: false, fit: true, zoom: false });
   gv.onerror(msg => {
     document.getElementById('graph').innerHTML =
@@ -1007,10 +1004,6 @@ function main(){
   // Transactions -> raw transfer-ledger graph
   document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
   document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderTxnGraph);
-  // little (i) button toggles the DOT source overlay over the graph
-  document.getElementById('dotToggle').addEventListener('click', () => {
-    document.getElementById('dotSource').classList.toggle('d-none');
-  });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
     if(!v) return;
