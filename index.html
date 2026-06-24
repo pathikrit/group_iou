@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Group IOU — settle up</title>
+
+<!-- All dependencies inline from CDN with pinned versions (see CLAUDE.md) -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2.34.2/dist/graphviz.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-graphviz@5.6.0/build/d3-graphviz.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.4/papaparse.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e7e9ee; --muted:#9aa3b2; --pos:#34d399; --neg:#f87171;
+    --accent:#60a5fa; --shadow:0 6px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:960px;margin:0 auto;padding:20px 16px 64px;}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:.2em 0 1.2em}
+  header h1{font-size:1.5rem;margin:0;min-width:0}
+  #appTitle{color:inherit;text-decoration:none;display:inline-block;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  #appTitle:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+  .gh{color:var(--muted);display:inline-flex;flex:0 0 auto}
+  .gh:hover{color:var(--text)}
+  .gh svg{width:26px;height:26px;display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin:0 0 18px;box-shadow:var(--shadow)}
+  h2{font-size:1.05rem;margin:.1em 0 .8em;color:var(--text)}
+  .muted{color:var(--muted)}
+  a{color:var(--accent)}
+
+  /* banners */
+  .banner{border-radius:12px;padding:12px 14px;margin:0 0 18px;font-size:.95rem}
+  .banner.error{background:#3a1517;border:1px solid #6b2326;color:#fecaca}
+  .banner.ok{background:#0f2a20;border:1px solid #1f5c44;color:#bbf7d0}
+  .banner.info{background:#13233a;border:1px solid #244a73;color:#cfe2ff}
+  .hidden{display:none !important}
+
+  /* table */
+  .tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+  td.amt{text-align:right;font-weight:600}
+  td.amt.pos{color:var(--pos)} td.amt.neg{color:var(--neg)}
+  tr.person{cursor:pointer;transition:background .15s}
+  tr.person:hover{background:var(--panel2)}
+  tr.person.active{background:#22304a}
+  .dot{display:inline-block;width:12px;height:12px;border-radius:50%;
+    margin-right:9px;vertical-align:-1px;border:1px solid rgba(255,255,255,.25)}
+  .name{font-weight:600}
+
+  /* graph */
+  #graph{width:100%;overflow:hidden;text-align:center;min-height:120px}
+  #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  #graph g.node,#graph g.edge{transition:opacity .15s}
+  /* when a node is selected, dim everything except the kept (connected) parts */
+  #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
+  #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
+  /* highlight the selected node + its edges */
+  #graph g.node.hl ellipse,#graph g.node.hl polygon,#graph g.node.hl path{
+    stroke:#fff !important;stroke-width:4px !important;
+    filter:drop-shadow(0 0 6px rgba(255,255,255,.6));
+  }
+  #graph g.edge.keep path{stroke-width:3px !important}
+  #graph g.edge.keep text{font-weight:700}
+
+  /* tabs */
+  .tabs{display:flex;gap:2px;margin:0 0 14px;border-bottom:1px solid var(--line)}
+  .tab{background:none;border:none;color:var(--muted);font-weight:600;font-size:.95rem;
+    padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab:hover{color:var(--text)}
+  .tab.active{color:var(--text);border-bottom-color:var(--accent)}
+
+  /* segmented toggle (dataset / column picker) */
+  .seg-toggle{display:flex;gap:6px;margin:0 0 14px;flex-wrap:wrap}
+  .seg{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:8px;
+    padding:6px 13px;font-weight:600;font-size:.85rem;cursor:pointer}
+  .seg:hover{color:var(--text)}
+  .seg.active{background:var(--accent);color:#06203f;border-color:var(--accent)}
+
+  /* source / embed */
+  .srcrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+  .srcrow input{flex:1;min-width:220px;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:.9rem}
+  .srcrow button{background:var(--accent);color:#06203f;border:none;border-radius:8px;
+    padding:9px 14px;font-weight:700;cursor:pointer}
+  .iframewrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .iframewrap iframe{width:100%;height:360px;border:0;background:#fff}
+  /* DOT source view */
+  #dotSource{margin:0;padding:12px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:10px;overflow-x:auto;color:var(--muted);font-size:.8rem;line-height:1.45;
+    white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  @media (max-width:560px){
+    .wrap{padding:14px 12px 56px}
+    header h1{font-size:1.3rem}
+    th,td{padding:9px 10px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><a id="appTitle" href="#" target="_blank" rel="noopener">Group IOU</a></h1>
+    <a class="gh" href="https://github.com/pathikrit/group_iou" target="_blank" rel="noopener"
+       aria-label="View source on GitHub" title="View source on GitHub">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+    </a>
+  </header>
+
+  <div id="status" class="banner info">Loading sheet…</div>
+
+  <section id="tableCard" class="card hidden">
+    <div class="tabs" data-tabs>
+      <button class="tab active" data-tab="pretty">Balances</button>
+      <button class="tab" data-tab="original">Input</button>
+    </div>
+    <div class="tabpanel" data-panel="pretty">
+      <div id="dsToggle" class="seg-toggle hidden"></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Name</th><th id="balHead" style="text-align:right">Balance</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="tabpanel hidden" data-panel="original">
+      <div class="srcrow">
+        <input id="dbInput" type="text" spellcheck="false" placeholder="Published Google Sheet URL (…/pubhtml?gid=0&single=true)" />
+        <button id="dbLoad">Load</button>
+      </div>
+      <div class="iframewrap"><iframe id="srcFrame" title="Source sheet" loading="lazy"></iframe></div>
+    </div>
+  </section>
+
+  <section id="settleCard" class="card hidden">
+    <div class="tabs" data-tabs>
+      <button class="tab active" data-tab="graph">Graph</button>
+      <button class="tab" data-tab="dot">DOT</button>
+    </div>
+    <div class="tabpanel" data-panel="graph">
+      <div id="graph"></div>
+    </div>
+    <div class="tabpanel hidden" data-panel="dot">
+      <pre id="dotSource"></pre>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ===================== CONFIG ===================== */
+// Default sheet used on first load (the last-loaded sheet is remembered locally).
+const DEMO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQLcZzzLn04LIt9xnaa43mMZyt1xUiisn2SzZ8Zbo1QeWnhyB1roNjwqw0EG9hvMwGGDYurUSwK5Oxv/pubhtml?gid=0&single=true";
+const EPS = 0.005;          // net-zero tolerance (< 1 cent)
+const STORE_KEY = 'iou_db'; // remembers the last sheet URL across reloads
+const PALETTE = d3.schemeTableau10;   // categorical colors for names
+const MAX_EXACT_N = 15;     // exact partition DP up to this many active people
+const MAX_TREE_S  = 8;      // exact spanning-tree search up to this group size
+
+/* ===================== URL / DATA HELPERS ===================== */
+// Turn a published "pubhtml" URL into a CSV endpoint (served with permissive CORS).
+function toCsvUrl(u){
+  try{
+    const url = new URL(u);
+    const path = url.pathname.replace(/\/pubhtml\/?$/, '/pub').replace(/\/pub\/?$/, '/pub');
+    const gid = url.searchParams.get('gid') || '0';
+    return `${url.origin}${path}?gid=${gid}&single=true&output=csv`;
+  }catch(e){ return u; }
+}
+
+// Fetch the published sheet as CSV text. Google serves the CSV with
+// `Access-Control-Allow-Origin: *`, so a direct browser fetch works — BUT only
+// from a real origin. Opening this file via file:// gives an opaque (null) origin
+// and browsers block the request ("Failed to fetch"); serve over http(s) instead.
+async function fetchSheetCsv(csvUrl){
+  const r = await fetch(csvUrl, { redirect: 'follow' });
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return await r.text();
+}
+
+// Best-effort: read the sheet's name from the pubhtml page's <title>. The CSV
+// endpoint has no title, so this is a separate fetch that may be CORS-blocked —
+// on any failure we just keep the default heading.
+function setTitle(name){
+  const t = (name || '').trim() || 'Group IOU';
+  document.getElementById('appTitle').textContent = t;
+  document.title = t;
+}
+async function fetchSheetTitle(pubUrl){
+  try{
+    const r = await fetch(pubUrl, { redirect: 'follow' });
+    if(!r.ok) return null;
+    const html = await r.text();
+    const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+    if(!m) return null;
+    const ta = document.createElement('textarea');     // decode HTML entities
+    ta.innerHTML = m[1];
+    return ta.value.replace(/\s*[-–—]\s*Google (Drive|Sheets)\s*$/i, '').trim() || null;
+  }catch(e){ return null; }
+}
+
+function parseAmount(s){
+  if(typeof s === 'number') return s;
+  if(s == null) return NaN;
+  s = String(s).trim();
+  if(!s) return NaN;
+  let neg = false;
+  if(/^\(.*\)$/.test(s)){ neg = true; s = s.slice(1, -1); }   // (123) => negative
+  s = s.replace(/[$,\s]/g, '');
+  if(s.startsWith('-')){ neg = true; s = s.slice(1); }
+  if(s.startsWith('+')) s = s.slice(1);
+  const v = parseFloat(s);
+  if(isNaN(v)) return NaN;
+  return neg ? -v : v;
+}
+
+const round2 = v => Math.round(v * 100) / 100;
+function money(v){
+  v = round2(v);
+  const a = Math.abs(v);
+  const s = Number.isInteger(a) ? String(a) : a.toFixed(2);
+  return (v < 0 ? '-$' : '$') + s;
+}
+// whole-dollar display (matches the spreadsheet style) but keeps sign
+function moneyWhole(v){
+  const r = Math.round(v);
+  return (r < 0 ? '-$' : '$') + Math.abs(r);
+}
+
+function colorFor(i){
+  if(i < PALETTE.length) return PALETTE[i];
+  return d3.hsl((i * 137.508) % 360, 0.62, 0.55).formatHex();
+}
+function textOn(bg){
+  const c = d3.color(bg).rgb();
+  const lum = (0.299*c.r + 0.587*c.g + 0.114*c.b) / 255;
+  return lum > 0.6 ? '#111111' : '#ffffff';
+}
+const esc = s => String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+
+/* ===================== SETTLEMENT ALGORITHM ===================== */
+// people: [{name, balance, idx}] -> returns {transfers:[{from,to,amount}], exact:bool}
+// 1) Minimum transfers = n - (max # of disjoint zero-sum subgroups)  [bitmask DP]
+// 2) Within each atomic subgroup, every minimal settlement is a spanning tree whose
+//    edge amounts are fully determined; enumerate trees, maximize the smallest edge.
+function computeTransfers(people){
+  const active = people.filter(p => Math.abs(p.balance) > EPS);
+  const n = active.length;
+  if(n === 0) return { transfers: [], exact: true };
+
+  let groups, exact = true;
+  if(n <= MAX_EXACT_N){
+    groups = maxZeroSumPartition(active);
+  }else{
+    exact = false;
+    groups = [active.slice()];   // treat as one group; greedy tree below
+  }
+
+  const transfers = [];
+  for(const g of groups){
+    if(g.length <= 1) continue;
+    const tree = (g.length <= MAX_TREE_S) ? bestSpanningTree(g) : greedyTree(g);
+    for(const t of tree) transfers.push(t);
+  }
+  // largest transfers first for a tidy display
+  transfers.sort((a,b) => b.amount - a.amount);
+  return { transfers, exact };
+}
+
+// Bitmask DP: partition into the max number of zero-sum subsets. Returns array of groups.
+function maxZeroSumPartition(active){
+  const n = active.length;
+  const bal = active.map(p => p.balance);
+  const full = (1 << n) - 1;
+  const sum = new Float64Array(1 << n);
+  for(let mask = 1; mask <= full; mask++){
+    const low = mask & (-mask);
+    const i = Math.log2(low) | 0;
+    sum[mask] = sum[mask ^ low] + bal[i];
+  }
+  const isZero = mask => mask !== 0 && Math.abs(sum[mask]) <= EPS;
+
+  const best = new Int32Array(1 << n).fill(-1);
+  const choice = new Int32Array(1 << n);
+  best[0] = 0;
+  for(let mask = 1; mask <= full; mask++){
+    const low = mask & (-mask);
+    // enumerate submasks of `mask` that contain the lowest set bit (counts each partition once)
+    for(let sub = mask; sub > 0; sub = (sub - 1) & mask){
+      if(!(sub & low)) continue;
+      if(!isZero(sub)) continue;
+      const rest = mask ^ sub;
+      if(best[rest] < 0) continue;
+      if(1 + best[rest] > best[mask]){ best[mask] = 1 + best[rest]; choice[mask] = sub; }
+    }
+  }
+
+  const groups = [];
+  let mask = full;
+  while(mask){
+    const sub = choice[mask];
+    const g = [];
+    for(let i = 0; i < n; i++) if(sub & (1 << i)) g.push(active[i]);
+    groups.push(g);
+    mask ^= sub;
+  }
+  return groups;
+}
+
+// All labeled spanning trees of a group via Prüfer sequences; pick the one whose
+// smallest edge amount is largest. Edge amounts are determined by subtree balance sums.
+function bestSpanningTree(g){
+  const s = g.length;
+  if(s === 2) return treeEdges(g, [[0,1]]);
+  // Among all spanning trees (all minimal settlements), pick the best by, in order:
+  //   1. fewest pass-through nodes, then 2. largest minimum transfer.
+  let best = null;
+  const seq = new Array(s - 2).fill(0);
+  const total = Math.pow(s, s - 2);
+  for(let k = 0; k < total; k++){
+    // decode k -> base-s Prüfer sequence
+    let x = k;
+    for(let j = 0; j < s - 2; j++){ seq[j] = x % s; x = (x / s) | 0; }
+    const edges = pruferToEdges(seq, s);
+    const cand = treeAmounts(g, edges);
+    if(!best ||
+       cand.passThrough < best.passThrough ||
+       (cand.passThrough === best.passThrough && cand.minAmt > best.minAmt)){
+      best = cand;
+    }
+  }
+  return best.detailed;
+}
+
+function pruferToEdges(seq, s){
+  const degree = new Array(s).fill(1);
+  for(const v of seq) degree[v]++;
+  const edges = [];
+  for(const v of seq){
+    let leaf = -1;
+    for(let i = 0; i < s; i++) if(degree[i] === 1){ leaf = i; break; }
+    edges.push([leaf, v]); degree[leaf]--; degree[v]--;
+  }
+  let u = -1;
+  for(let i = 0; i < s; i++) if(degree[i] === 1){ if(u < 0) u = i; else { edges.push([u, i]); break; } }
+  return edges;
+}
+
+// Given group + edges (local indices) compute directed transfer amounts via subtree sums.
+function treeAmounts(g, edges){
+  const s = g.length;
+  const adj = Array.from({length: s}, () => []);
+  for(let e = 0; e < edges.length; e++){ const [a,b] = edges[e]; adj[a].push([b,e]); adj[b].push([a,e]); }
+  const subSum = new Float64Array(s);
+  const parent = new Int32Array(s).fill(-1);
+  const parentEdge = new Int32Array(s).fill(-1);
+  const order = [];
+  const seen = new Array(s).fill(false);
+  const stack = [0]; seen[0] = true;
+  while(stack.length){
+    const u = stack.pop(); order.push(u);
+    for(const [v,e] of adj[u]) if(!seen[v]){ seen[v] = true; parent[v] = u; parentEdge[v] = e; stack.push(v); }
+  }
+  for(let i = order.length - 1; i >= 0; i--){
+    const u = order[i];
+    subSum[u] += g[u].balance;
+    if(parent[u] >= 0) subSum[parent[u]] += subSum[u];
+  }
+  const detailed = [];
+  let minAmt = Infinity;
+  const inDeg = new Int32Array(s), outDeg = new Int32Array(s);
+  for(let v = 0; v < s; v++){
+    if(parent[v] < 0) continue;
+    const p = parent[v];
+    const flow = subSum[v];               // net balance of subtree rooted at v
+    const amt = Math.abs(flow);
+    if(amt <= EPS) continue;
+    // flow<0: subtree owes -> child pays parent; flow>0: subtree is owed -> parent pays child
+    const fromI = flow < 0 ? v : p;
+    const toI   = flow < 0 ? p : v;
+    outDeg[fromI]++; inDeg[toI]++;
+    detailed.push({ from: g[fromI].name, to: g[toI].name, amount: amt });
+    if(amt < minAmt) minAmt = amt;
+  }
+  // "pass-through" node = has both an incoming and an outgoing edge (a money proxy)
+  let passThrough = 0;
+  for(let i = 0; i < s; i++) if(inDeg[i] > 0 && outDeg[i] > 0) passThrough++;
+  return { detailed, minAmt: detailed.length ? minAmt : Infinity, passThrough };
+}
+
+function treeEdges(g, edges){ return treeAmounts(g, edges).detailed; }
+
+// Fallback for unusually large atomic groups: greedy largest debtor -> largest creditor.
+function greedyTree(g){
+  const bal = g.map(p => ({ name: p.name, b: p.balance }));
+  const out = [];
+  const cmp = (x,y) => x.b - y.b;
+  let guard = 0;
+  while(guard++ < 10000){
+    bal.sort(cmp);
+    const d = bal[0], c = bal[bal.length - 1];
+    if(!d || !c || d.b >= -EPS || c.b <= EPS) break;
+    const amt = Math.min(-d.b, c.b);
+    out.push({ from: d.name, to: c.name, amount: amt });
+    d.b += amt; c.b -= amt;
+  }
+  return out;
+}
+
+/* ===================== RENDERING ===================== */
+let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
+let activeNode = null;
+let currentTransfers = [];   // [{from, to, amount}] currently drawn
+let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
+let datasets = [];           // [{label, col}] named value columns from the header
+let selectedDataset = 0;
+
+function buildDot(transfers){
+  const fontname = "Helvetica,Arial,sans-serif";
+  let dot = 'digraph G {\n';
+  dot += '  bgcolor="transparent"; rankdir=LR; pad=0.2; nodesep=0.5; ranksep=0.8;\n';
+  dot += `  node [shape=circle, style="filled", fontname="${fontname}", fontsize=14, penwidth=2, color="#0b0d11", margin=0.08];\n`;
+  dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
+  for(const p of people){
+    const lbl = `<${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
+    dot += `  "${esc(p.name)}" [id="${p.nodeId}", label=${lbl}, fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
+  }
+  transfers.forEach((t, i) => {
+    dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
+  });
+  dot += '}\n';
+  return dot;
+}
+
+function renderGraph(transfers){
+  currentTransfers = transfers;
+  const dot = buildDot(transfers);
+  document.getElementById('dotSource').textContent = dot;
+  const gv = d3.select('#graph').graphviz({ useWorker: false, fit: true, zoom: false });
+  gv.onerror(msg => {
+    document.getElementById('graph').innerHTML =
+      '<p class="muted">Could not render graph: ' + msg + '</p>';
+  });
+  gv.renderDot(dot, () => {
+    const svg = d3.select('#graph svg');
+    svg.attr('width', '100%').attr('height', null);
+    // make rows able to highlight nodes (re-bind because SVG is regenerated)
+    d3.selectAll('#graph g.node').style('cursor', 'pointer').on('click', function(){
+      const id = this.getAttribute('id');
+      const p = people.find(x => x.nodeId === id);
+      if(p) selectPerson(p.nodeId);
+    });
+    applyGraphSelection();
+  });
+}
+
+function selectPerson(nodeId){
+  activeNode = (activeNode === nodeId) ? null : nodeId;
+  d3.selectAll('#tbody tr.person').classed('active', function(){ return this.dataset.node === activeNode; });
+  applyGraphSelection();
+}
+
+// Highlight the selected node, its incoming/outgoing edges and connected
+// vertices; dim everything else.
+function applyGraphSelection(){
+  const graph = document.getElementById('graph');
+  if(!graph) return;
+  d3.selectAll('#graph g.node, #graph g.edge').classed('keep', false).classed('hl', false);
+
+  const sel = activeNode && people.find(p => p.nodeId === activeNode);
+  if(!sel){ graph.classList.remove('selecting'); return; }
+  graph.classList.add('selecting');
+
+  const keepNodes = new Set([activeNode]);
+  currentTransfers.forEach((t, i) => {
+    if(t.from !== sel.name && t.to !== sel.name) return;
+    const otherName = t.from === sel.name ? t.to : t.from;
+    const other = people.find(p => p.name === otherName);
+    if(other) keepNodes.add(other.nodeId);
+    d3.select('#edge-' + i).classed('keep', true);
+  });
+  d3.selectAll('#graph g.node').each(function(){
+    const id = this.getAttribute('id');
+    d3.select(this).classed('keep', keepNodes.has(id)).classed('hl', id === activeNode);
+  });
+}
+
+function clearSelection(){
+  if(!activeNode) return;
+  activeNode = null;
+  d3.selectAll('#tbody tr.person').classed('active', false);
+  applyGraphSelection();
+}
+
+function renderTable(){
+  const tb = document.getElementById('tbody');
+  tb.innerHTML = '';
+  for(const p of people){
+    const tr = document.createElement('tr');
+    tr.className = 'person';
+    tr.dataset.node = p.nodeId;
+    const sign = p.balance < 0 ? 'neg' : 'pos';
+    tr.innerHTML =
+      `<td><span class="dot" style="background:${p.color}"></span><span class="name">${escapeHtml(p.name)}</span></td>` +
+      `<td class="amt ${sign}">${moneyWhole(p.balance)}</td>`;
+    tr.addEventListener('click', () => selectPerson(p.nodeId));
+    tb.appendChild(tr);
+  }
+  document.getElementById('tableCard').classList.remove('hidden');
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function wireTabs(){
+  document.querySelectorAll('[data-tabs]').forEach(group => {
+    const card = group.parentElement;
+    group.querySelectorAll('.tab').forEach(tab =>
+      tab.addEventListener('click', () => activateTab(card, tab.dataset.tab)));
+  });
+}
+function activateTab(card, name){
+  card.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  card.querySelectorAll('.tabpanel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
+}
+
+function setStatus(kind, msg){
+  const el = document.getElementById('status');
+  el.className = 'banner ' + kind;
+  el.innerHTML = msg;
+  el.classList.toggle('hidden', !msg);
+}
+
+/* ===================== MAIN ===================== */
+// Fetch + render a sheet. No URL params — the sheet comes from the UI / storage.
+async function load(db){
+  people = [];
+  activeNode = null;
+  document.getElementById('settleCard').classList.add('hidden');
+  setStatus('info', 'Loading sheet…');
+
+  // reflect the current source in the Input tab + make the title link to the sheet
+  document.getElementById('dbInput').value = db;
+  document.getElementById('appTitle').href = db;
+  document.getElementById('srcFrame').src = db;
+
+  // best-effort: use the sheet's name as the page title (non-blocking)
+  setTitle(null);
+  fetchSheetTitle(db).then(t => { if(t) setTitle(t); });
+
+  let rows;
+  try{
+    const text = await fetchSheetCsv(toCsvUrl(db));
+    rows = Papa.parse(text, { skipEmptyLines: true }).data;
+  }catch(e){
+    const fileHint = location.protocol === 'file:'
+      ? ' You are opening this file directly (file://), which browsers block from fetching. ' +
+        'Serve it over http — e.g. <code>python3 -m http.server</code> then open ' +
+        '<code>http://localhost:8000/</code> — or use the deployed GitHub Pages URL.'
+      : ' Make sure the sheet is published to the web. Use the <em>Input</em> tab to fix the URL.';
+    setStatus('error', 'Could not load the sheet (' + escapeHtml(e.message) + ').' + fileHint);
+    document.getElementById('tableCard').classList.remove('hidden');
+    activateTab(document.getElementById('tableCard'), 'original');
+    return;
+  }
+
+  // Column 0 = name. Each later column with a header label is a selectable
+  // dataset (e.g. "Current", "All Time", dated snapshots).
+  const header = rows[0] || [];
+  datasets = [];
+  for(let c = 1; c < header.length; c++){
+    const lbl = (header[c] == null ? '' : String(header[c])).trim();
+    if(lbl) datasets.push({ label: lbl, col: c });
+  }
+  let dataRows = rows.slice(1);
+  if(!datasets.length){            // no header labels (old format): single column
+    datasets = [{ label: 'Balance', col: 1 }];
+    dataRows = rows;
+  }
+
+  // one person per row, with a value per dataset column ('' / non-numeric -> 0)
+  rawPeople = [];
+  for(const r of dataRows){
+    const name = (r[0] == null ? '' : String(r[0])).trim();
+    if(!name || name.toLowerCase() === 'total') continue;
+    if(!datasets.some(d => !isNaN(parseAmount(r[d.col])))) continue;   // no numbers -> skip
+    const values = datasets.map(d => { const v = parseAmount(r[d.col]); return isNaN(v) ? 0 : round2(v); });
+    rawPeople.push({ name, values });
+  }
+
+  if(!rawPeople.length){
+    setStatus('error', 'No <code>name, balance</code> rows found in the sheet. Expected the first column to be a name and later columns to be balances.');
+    return;
+  }
+
+  selectedDataset = 0;
+  renderDatasetToggle();
+  showDataset(0);
+}
+
+// Build `people` from the chosen column, then render the table + graph.
+function showDataset(idx){
+  selectedDataset = idx;
+  activeNode = null;
+  people = rawPeople.map((rp, i) => ({
+    name: rp.name, balance: rp.values[idx], idx: i, color: colorFor(i), nodeId: 'node-' + i
+  }));
+  document.querySelectorAll('#dsToggle .seg').forEach((b, i) => b.classList.toggle('active', i === idx));
+  document.getElementById('balHead').textContent = datasets[idx].label;
+
+  renderTable();
+  const net = people.reduce((a, p) => a + p.balance, 0);
+  if(Math.abs(net) > EPS){
+    setStatus('error', `"${escapeHtml(datasets[idx].label)}" balances don't net to $0 — ` +
+      `off by <strong>${money(net)}</strong>. Fix the sheet so every dollar is accounted for.`);
+    document.getElementById('settleCard').classList.add('hidden');
+    return;
+  }
+  setStatus('', '');
+  document.getElementById('settleCard').classList.remove('hidden');
+  renderGraph(computeTransfers(people).transfers);
+}
+
+function renderDatasetToggle(){
+  const el = document.getElementById('dsToggle');
+  el.innerHTML = '';
+  el.classList.toggle('hidden', datasets.length <= 1);   // no toggle for a single column
+  datasets.forEach((d, i) => {
+    const b = document.createElement('button');
+    b.className = 'seg';
+    b.textContent = d.label;
+    b.addEventListener('click', () => showDataset(i));
+    el.appendChild(b);
+  });
+}
+
+function main(){
+  wireTabs();
+  // clicking empty space in the graph (not a node) clears the selection
+  document.getElementById('graph').addEventListener('click', e => {
+    if(!e.target.closest('g.node')) clearSelection();
+  });
+  document.getElementById('dbLoad').addEventListener('click', () => {
+    const v = document.getElementById('dbInput').value.trim();
+    if(!v) return;
+    try { localStorage.setItem(STORE_KEY, v); } catch(e) {}
+    activateTab(document.getElementById('tableCard'), 'pretty');
+    load(v);
+  });
+  let saved = null;
+  try { saved = localStorage.getItem(STORE_KEY); } catch(e) {}
+  load(saved || DEMO);
+}
+
+main();
+</script>
+</body>
+</html>
