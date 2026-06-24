@@ -29,8 +29,8 @@
   #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
   /* graph (Graphviz SVG internals — no Bootstrap equivalent) */
-  #graph{min-height:160px;overflow-x:hidden}    /* never scroll the page horizontally */
-  #graph svg{max-width:82%;height:auto;display:block;margin:0 auto}
+  #graph{min-height:160px}
+  #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -41,8 +41,7 @@
 
   @media (max-width:768px){
     #pane-txn .fixed-table-body{max-height:60vh}
-    #graph{min-height:240px}
-    #graph svg{max-width:100%}     /* fill width so the graph never scrolls the page */
+    #graph{min-height:320px}
   }
 </style>
 </head>
@@ -987,7 +986,7 @@ function renderDatasetToggle(){
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.ds = i;
-    b.className = 'btn btn-lg rounded-pill btn-outline-secondary fw-semibold';
+    b.className = 'btn rounded-pill btn-outline-secondary fw-semibold';
     b.textContent = d.label;
     b.addEventListener('click', pick(i));
     el.appendChild(b);
