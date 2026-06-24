@@ -61,7 +61,11 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 ## UI specifics
 - Two cards, tabbed: **Balances** (table + dataset toggle) / **Input** (URL + iframe);
   **Transfers** (Graph / raw DOT). No textual transfer list — graph only.
-- Node label = name + balance (HTML-like DOT label, amount at `POINT-SIZE 8`).
+- Amounts (balances + transfers) display in **dollars** (`moneyWhole`).
+- Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
+  Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
+  the tier is chosen by the balance as a **% of the pot** (`totalPot` = sum of
+  positive balances) so it scales with stakes; thresholds 5/15/30/50%.
 - Click row or node → highlight that node + its edges + neighbors, dim the rest
   (`applyGraphSelection`, `selecting`/`keep`/`hl` classes; edges get DOT `id=edge-N`).
   Click graph blank space → `clearSelection`. Colors keyed by row index (stable
