@@ -20,6 +20,9 @@
   /* The only non-Bootstrap CSS: a darker dark palette (via Bootstrap's own CSS
      variables — its recommended theming hook) and the Graphviz SVG internals (no
      Bootstrap equivalent). Font sizes are left to Bootstrap defaults. */
+  /* Stop mobile Chrome from auto-inflating ("font boosting") the table/tabs text,
+     which blows up the HTML relative to the fixed-size SVG graph. */
+  html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }
   [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
