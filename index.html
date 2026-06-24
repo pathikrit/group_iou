@@ -194,8 +194,9 @@ function emojiFor(balance, pot, rank, count){
   if(count >= 2 && rank === 0) e += '👑';                 // winner
   else if(count >= 3 && rank === 1) e += '🥈';            // runner-up
   if(count >= 2 && rank === count - 1) e += '💩';         // last place
+  if(Math.abs(balance) <= EPS) return e + '👻';           // exact $0 (present, evened out)
   const pct = pot ? Math.abs(balance) / pot * 100 : 0;    // magnitude tiers, % of pot
-  if(pct < 5) e += '🤷';                                  // ~even (either sign)
+  if(pct < 5) e += '🤷';                                  // near-even (nonzero, either sign)
   else if(balance > 0) e += pct < 15 ? '😅' : pct < 30 ? '😁' : pct < 50 ? '🥳' : '🍾';
   else                 e += pct < 15 ? '😓' : pct < 30 ? '😫' : pct < 50 ? '😭' : '😱';
   return e;
@@ -419,10 +420,10 @@ function buildDot(transfers){
   // one uniform diameter for every node, sized to fit the longest name (so all
   // circles match AND nothing clips). ~0.6em avg glyph; /0.78 to fit a line in a
   // circle; +padding.
-  // only people with a non-zero balance appear in the graph; settled / no-IOU
-  // ($0) people stay in the table but are omitted here (an isolated node would
-  // float to a random spot since it has no edges).
-  const shown = people.filter(p => Math.abs(p.balance) > EPS);
+  // Everyone present shows (incl. exact-$0 "evened out" 👻 nodes); only MISSING
+  // people are absent (they're not in `people` at all). $0 nodes have no transfer
+  // edges, so an invisible edge anchors them to the bottom (see below).
+  const shown = people;
   const NAME_PT = 14;
   const maxChars = Math.max(3, ...shown.map(p => p.name.length));
   const diameter = Math.max(1.0, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.25).toFixed(2);
@@ -438,6 +439,12 @@ function buildDot(transfers){
   transfers.forEach((t, i) => {
     dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
   });
+  // anchor settled ($0) nodes below the flow via an invisible edge from a creditor
+  const zeros = people.filter(p => Math.abs(p.balance) <= EPS);
+  const anchor = people.find(p => p.balance > EPS);
+  if(anchor) for(const z of zeros){
+    dot += `  "${esc(anchor.name)}" -> "${esc(z.name)}" [style=invis];\n`;
+  }
   dot += '}\n';
   return dot;
 }

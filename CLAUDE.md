@@ -73,7 +73,12 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
   Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
   the tier is chosen by the balance as a **% of the pot** (`totalPot` = sum of
-  positive balances) so it scales with stakes; thresholds 5/15/30/50%.
+  positive balances) so it scales with stakes; thresholds 5/15/30/50%. **Exact $0**
+  (present, evened out) → 👻 (distinct from near-zero nonzero 🤷). **Missing** people
+  (empty cell, not in `people`) show nothing.
+- Graph shows everyone present, incl. exact-$0 nodes (no transfer edges). $0 nodes
+  are pushed to the bottom by an invisible edge from a creditor to each (plain
+  `rank=sink` doesn't work — they're disconnected). Missing people aren't drawn.
 - Click row or node → highlight that node + its edges + neighbors, dim the rest
   (`applyGraphSelection`, `selecting`/`keep`/`hl` classes; edges get DOT `id=edge-N`).
   Click graph blank space → `clearSelection`. Colors keyed by row index (stable
