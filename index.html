@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Group IOU — settle up</title>
+<title>Group IOU</title>
 
 <!-- All dependencies inline from CDN with pinned versions (see CLAUDE.md) -->
 <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
@@ -205,9 +205,8 @@ async function fetchSheetCsv(csvUrl){
 // endpoint has no title, so this is a separate fetch that may be CORS-blocked —
 // on any failure we just keep the default heading.
 function setTitle(name){
-  const t = (name || '').trim() || 'Group IOU';
-  document.getElementById('appTitle').textContent = t;
-  document.title = t;
+  // heading shows the sheet name; the document <title> stays "Group IOU"
+  document.getElementById('appTitle').textContent = (name || '').trim() || 'Group IOU';
 }
 async function fetchSheetTitle(pubUrl){
   try{
@@ -263,9 +262,28 @@ const esc = s => String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
 
 /* ===================== SETTLEMENT ALGORITHM ===================== */
 // people: [{name, balance, idx}] -> returns {transfers:[{from,to,amount}], exact:bool}
-// 1) Minimum transfers = n - (max # of disjoint zero-sum subgroups)  [bitmask DP]
-// 2) Within each atomic subgroup, every minimal settlement is a spanning tree whose
-//    edge amounts are fully determined; enumerate trees, maximize the smallest edge.
+//
+// We pick the settlement graph by three constraints, applied strictly in order:
+//
+//   Constraint 1 — fewest edges (fewest transfers).
+//     = n - (max number of disjoint zero-sum subgroups), via the bitmask DP in
+//       maxZeroSumPartition. Each atomic subgroup then settles as a spanning tree
+//       (exactly size-1 edges), and each tree edge's amount + direction is fully
+//       determined by its subtree balance sum.
+//
+//   Constraint 2 — among all graphs meeting Constraint 1, the fewest "proxy" nodes,
+//     i.e. nodes that have both an incoming and an outgoing edge. We prefer
+//     {A->B; A->C} over {A->B->C}: in the chain, B just proxies A's money to C, so
+//     we'd rather A make 2 direct transfers than route through an intermediary.
+//     (Counting proxies, not senders, also rules out debtor proxies like A->B->C
+//     where B is itself a debtor.)
+//
+//   Constraint 3 — among all graphs meeting Constraints 1 and 2, the one that
+//     maximizes the smallest transfer (avoid needless tiny payments).
+//
+// Constraints 2 and 3 are optimized in bestSpanningTree by enumerating every
+// spanning tree of each subgroup and selecting lexicographically: fewest proxy
+// nodes, then largest minimum edge.
 function computeTransfers(people){
   const active = people.filter(p => Math.abs(p.balance) > EPS);
   const n = active.length;
@@ -330,13 +348,14 @@ function maxZeroSumPartition(active){
   return groups;
 }
 
-// All labeled spanning trees of a group via Prüfer sequences; pick the one whose
-// smallest edge amount is largest. Edge amounts are determined by subtree balance sums.
+// All labeled spanning trees of a group via Prüfer sequences. Edge amounts are
+// determined by subtree balance sums; pick the best tree per Constraints 2 then 3.
 function bestSpanningTree(g){
   const s = g.length;
   if(s === 2) return treeEdges(g, [[0,1]]);
   // Among all spanning trees (all minimal settlements), pick the best by, in order:
-  //   1. fewest pass-through nodes, then 2. largest minimum transfer.
+  //   Constraint 2: fewest proxy nodes (both an incoming and an outgoing edge), then
+  //   Constraint 3: largest minimum transfer.
   let best = null;
   const seq = new Array(s - 2).fill(0);
   const total = Math.pow(s, s - 2);
@@ -347,8 +366,8 @@ function bestSpanningTree(g){
     const edges = pruferToEdges(seq, s);
     const cand = treeAmounts(g, edges);
     if(!best ||
-       cand.passThrough < best.passThrough ||
-       (cand.passThrough === best.passThrough && cand.minAmt > best.minAmt)){
+       cand.proxies < best.proxies ||
+       (cand.proxies === best.proxies && cand.minAmt > best.minAmt)){
       best = cand;
     }
   }
@@ -405,10 +424,11 @@ function treeAmounts(g, edges){
     detailed.push({ from: g[fromI].name, to: g[toI].name, amount: amt });
     if(amt < minAmt) minAmt = amt;
   }
-  // "pass-through" node = has both an incoming and an outgoing edge (a money proxy)
-  let passThrough = 0;
-  for(let i = 0; i < s; i++) if(inDeg[i] > 0 && outDeg[i] > 0) passThrough++;
-  return { detailed, minAmt: detailed.length ? minAmt : Infinity, passThrough };
+  // Constraint 2 metric: proxy nodes = have BOTH an incoming and an outgoing edge,
+  // i.e. money just passes through them (B in A->B->C).
+  let proxies = 0;
+  for(let i = 0; i < s; i++) if(inDeg[i] > 0 && outDeg[i] > 0) proxies++;
+  return { detailed, minAmt: detailed.length ? minAmt : Infinity, proxies };
 }
 
 function treeEdges(g, edges){ return treeAmounts(g, edges).detailed; }

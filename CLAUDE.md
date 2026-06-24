@@ -38,15 +38,25 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
   else error + no graph.
 
-## Algorithm (`computeTransfers`) — strict lexicographic objective
-1. **Fewest transfers** = `n − k`, `k` = max disjoint zero-sum subgroups (bitmask DP,
-   exact ≤ `MAX_EXACT_N`, greedy above). Each atomic subgroup settles as a spanning
-   tree (`size−1` edges); each edge's amount+direction is fixed by its subtree sum.
-2. **Fewest pass-through nodes** (have both in- and out-edge, i.e. money proxies).
-3. **Largest minimum transfer** (tie-break).
-   `bestSpanningTree` enumerates all spanning trees via Prüfer sequences (≤
-   `MAX_TREE_S`); `treeAmounts` returns `{detailed, minAmt, passThrough}`; selection
-   is (passThrough asc, then minAmt desc).
+## Algorithm (`computeTransfers`) — three constraints, applied strictly in order
+The code MUST follow these exactly; keep the matching comment in `computeTransfers`.
+1. **Constraint 1 — fewest edges (fewest transfers).** `= n − k`, `k` = max number
+   of disjoint zero-sum subgroups (bitmask DP in `maxZeroSumPartition`; exact ≤
+   `MAX_EXACT_N`, greedy fallback above). Each atomic subgroup then settles as a
+   spanning tree (`size−1` edges); each edge's amount+direction is fixed by its
+   subtree balance sum.
+2. **Constraint 2 — of those, fewest proxy nodes.** A proxy = a node with *both* an
+   incoming and an outgoing edge. Prefer `{A→B; A→C}` over `{A→B→C}` (in the chain B
+   just relays A's money to C; rather have A make 2 direct transfers).
+   - NB: this is "both in AND out", **not** "any outgoing edge". The latter (counting
+     senders) was tried and rejected — it leaves *debtor* proxies in place (a debtor
+     is already a sender, so relaying through it is free), e.g. the demo collapsed to
+     a `Nate→Rick→Linh→…` chain. Counting proxies avoids that. (User confirmed.)
+3. **Constraint 3 — of those, maximize the smallest transfer** (avoid tiny payments).
+
+`bestSpanningTree` enumerates all spanning trees via Prüfer sequences (≤ `MAX_TREE_S`);
+`treeAmounts` returns `{detailed, minAmt, proxies}`; selection is lexicographic
+(proxies asc, then minAmt desc).
 
 ## UI specifics
 - Two cards, tabbed: **Balances** (table + dataset toggle) / **Input** (URL + iframe);
