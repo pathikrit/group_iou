@@ -97,25 +97,36 @@
     padding:9px 14px;font-weight:700;cursor:pointer}
   .iframewrap{border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .iframewrap iframe{width:100%;height:360px;border:0;background:#fff}
-  /* DOT source view */
-  #dotSource{margin:0;padding:12px;background:var(--panel2);border:1px solid var(--line);
-    border-radius:10px;overflow-x:auto;color:var(--muted);font-size:.8rem;line-height:1.45;
-    white-space:pre;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  /* graph box + DOT-source overlay toggled by the little (i) button */
+  .graphbox{position:relative}
+  .dot-info{position:absolute;bottom:8px;right:8px;width:26px;height:26px;border-radius:50%;
+    border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;
+    font-size:1rem;line-height:1;display:flex;align-items:center;justify-content:center;z-index:4}
+  .dot-info:hover{color:var(--text)}
+  #dotSource{position:absolute;inset:0;z-index:3;margin:0;padding:12px;overflow:auto;
+    background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--muted);
+    font-size:.8rem;line-height:1.45;white-space:pre;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
   @media (max-width:560px){
     .wrap{padding:14px 12px 56px}
-    header h1{font-size:1.7rem}
-    /* bigger, more tappable tabs + dataset toggle */
-    .tab{font-size:1.05rem;padding:11px 16px}
-    .seg{font-size:1rem;padding:10px 16px}
-    /* roomier, more legible balances table */
-    th,td{padding:14px 12px}
-    th{font-size:.9rem}
-    .chip{font-size:1.05rem;padding:5px 11px}
-    td.amt{font-size:1.15rem}
+    .card{padding:14px}
+    header h1{font-size:1.9rem}
+    /* bigger, more tappable tabs + toggle + buttons */
+    .tab{font-size:1.2rem;padding:14px 18px}
+    .seg{font-size:1.15rem;padding:13px 18px}
+    .srcrow input{font-size:1.05rem;padding:13px 13px}
+    .srcrow button{font-size:1.05rem;padding:13px 20px}
+    /* much roomier, more legible balances table */
+    table{font-size:1.2rem}
+    th,td{padding:17px 12px}
+    th{font-size:1rem}
+    .rank{font-size:1.15rem}
+    .chip{font-size:1.25rem;padding:8px 15px}
+    td.amt{font-size:1.4rem}
     /* taller graph + larger DOT text */
-    #graph{min-height:300px}
-    #dotSource{font-size:.85rem}
+    #graph{min-height:320px}
+    #dotSource{font-size:.9rem}
   }
 </style>
 </head>
@@ -140,7 +151,6 @@
       <div id="dsToggle" class="seg-toggle hidden"></div>
       <div class="tablewrap">
         <table>
-          <thead><tr><th class="rank">#</th><th>Name</th><th id="balHead" style="text-align:right">Balance</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -155,15 +165,10 @@
   </section>
 
   <section id="settleCard" class="card hidden">
-    <div class="tabs" data-tabs>
-      <button class="tab active" data-tab="graph">Graph</button>
-      <button class="tab" data-tab="dot">DOT</button>
-    </div>
-    <div class="tabpanel" data-panel="graph">
+    <div class="graphbox">
       <div id="graph"></div>
-    </div>
-    <div class="tabpanel hidden" data-panel="dot">
-      <pre id="dotSource"></pre>
+      <pre id="dotSource" class="hidden"></pre>
+      <button id="dotToggle" class="dot-info" aria-label="Show DOT source" title="DOT source">&#9432;</button>
     </div>
   </section>
 </div>
@@ -730,7 +735,6 @@ function showDataset(idx){
   const pot = totalPot();
   people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
   document.querySelectorAll('#dsToggle .seg').forEach((b, i) => b.classList.toggle('active', i === idx));
-  document.getElementById('balHead').textContent = datasets[idx].label;
 
   renderTable();
   const net = people.reduce((a, p) => a + p.balance, 0);
@@ -766,6 +770,10 @@ function main(){
   });
   // re-render the graph when crossing the mobile breakpoint (LR <-> TB)
   MOBILE_MQ.addEventListener('change', () => { if(people.length) renderGraph(currentTransfers); });
+  // little (i) button toggles the DOT source overlay over the graph
+  document.getElementById('dotToggle').addEventListener('click', () => {
+    document.getElementById('dotSource').classList.toggle('hidden');
+  });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
     if(!v) return;

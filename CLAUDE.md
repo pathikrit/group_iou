@@ -59,8 +59,10 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 (proxies asc, then minAmt desc).
 
 ## UI specifics
-- Two cards, tabbed: **Balances** (table + dataset toggle) / **Input** (URL + iframe);
-  **Transfers** (Graph / raw DOT). No textual transfer list — graph only.
+- **Balances** card is tabbed: **Balances** (table + dataset toggle) / **Input**
+  (URL + iframe). **Transfers** card just shows the graph (no tabs); the raw DOT is
+  behind a little ⓘ button (`#dotToggle`) at the graph box's bottom-right, which
+  toggles a `#dotSource` overlay. No textual transfer list — graph only.
 - Amounts (balances + transfers) display in **dollars** (`moneyWhole`).
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
   Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
