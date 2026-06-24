@@ -22,24 +22,27 @@
   [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
-  .nav-tabs .nav-link{color:var(--bs-secondary-color)}
+  .nav-tabs .nav-link{color:var(--bs-secondary-color);font-size:1.15rem}
   .nav-tabs .nav-link.active{color:var(--bs-body-color);font-weight:600}
 
-  /* dataset toggle pills — dated snapshots; CTA pills (IOU/All Time) bigger */
+  /* dataset toggle pills — dated snapshots; CTA pills (IOU/All Time) a touch bigger */
   #dsToggle{align-items:center}
   #dsToggle .btn{font-size:1.05rem;padding:.4rem 1.1rem}
-  #dsToggle .ds-cta{font-size:1.35rem;padding:.55rem 1.6rem;font-weight:600}
+  #dsToggle .ds-cta{font-size:1.15rem;padding:.45rem 1.3rem;font-weight:600}
 
   /* balances + transactions tables (Bootstrap Table) — selection + chip sizing */
-  #balTable,#txnTable{font-size:1.1rem}    /* slightly larger than default */
+  #balTable,#txnTable{font-size:1.3rem}    /* prominent — this is the main content */
   #balTable td{cursor:pointer}
   #balTable tbody tr.table-active{--bs-table-bg-state:rgba(96,165,250,.16)}
   #balTable .badge,#txnTable .badge{font-size:.95em}   /* chip scales with the table font */
   .bootstrap-table .fixed-table-container{border:0}
+  /* Transactions: show ~10 newest rows, then scroll, with a sticky header */
+  #pane-txn .fixed-table-body{max-height:32rem;overflow:auto}
+  #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
-  /* graph (SVG internals have no Bootstrap equivalent) */
-  #graph{min-height:140px}
-  #graph svg{max-width:85%;height:auto;display:block;margin:0 auto}
+  /* graph (SVG internals have no Bootstrap equivalent) — kept compact, table-first */
+  #graph{min-height:110px}
+  #graph svg{max-width:60%;height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -49,20 +52,21 @@
   #graph g.edge.keep text{font-weight:700}
 
   @media (max-width:768px){
-    .nav-link{font-size:1.2rem}
-    #dsToggle .btn{font-size:1.15rem;padding:.45rem 1.15rem}
-    #dsToggle .ds-cta{font-size:1.5rem;padding:.6rem 1.6rem}
-    #balTable,#txnTable{font-size:1.35rem}
-    #graph{min-height:280px}
-    #graph svg{max-width:100%}            /* fill the narrow screen on mobile */
+    .nav-tabs .nav-link{font-size:1.35rem}
+    #dsToggle .btn{font-size:1.1rem;padding:.45rem 1.15rem}
+    #dsToggle .ds-cta{font-size:1.25rem;padding:.5rem 1.3rem}
+    #balTable,#txnTable{font-size:1.7rem}     /* big & legible on phones */
+    #pane-txn .fixed-table-body{max-height:60vh}
+    #graph{min-height:160px}
+    #graph svg{max-width:78%}                  /* much smaller graph on mobile */
   }
 </style>
 </head>
 <body>
 <div class="container py-3" style="max-width:960px">
-  <header class="d-flex align-items-center justify-content-between gap-3 mb-3">
-    <h1 class="h2 m-0 text-truncate"><a id="appTitle" class="link-body-emphasis text-decoration-none text-truncate d-inline-block mw-100" href="#" target="_blank" rel="noopener">Group IOU</a></h1>
-    <a class="link-secondary flex-shrink-0" href="https://github.com/pathikrit/group_iou" target="_blank" rel="noopener"
+  <header class="position-relative d-flex align-items-center justify-content-center mb-3">
+    <h1 class="h2 m-0 text-truncate text-center w-100 px-5"><a id="appTitle" class="link-body-emphasis text-decoration-none text-truncate d-inline-block mw-100" href="#" target="_blank" rel="noopener">Group IOU</a></h1>
+    <a class="link-secondary flex-shrink-0 position-absolute end-0 top-50 translate-middle-y" href="https://github.com/pathikrit/group_iou" target="_blank" rel="noopener"
        aria-label="View source on GitHub" title="View source on GitHub">
       <svg width="28" height="28" class="d-block" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
     </a>
@@ -593,10 +597,20 @@ function columnMedals(colIdx){
   return m;
 }
 
+// Render a bag of medal chars in 🥇→🥈→💩 order, collapsing any kind with >5 to
+// "🥇×11" so a long winning streak doesn't blow out the cell.
+const MEDAL_ORDER = ['🥇', '🥈', '💩'];
+function medalString(arr){
+  const counts = {};
+  for(const m of arr) counts[m] = (counts[m] || 0) + 1;
+  return MEDAL_ORDER.filter(k => counts[k])
+    .map(k => counts[k] > 5 ? `${k}×${counts[k]}` : k.repeat(counts[k]))
+    .join('');
+}
+
 // All medals each person accumulated across the dated columns (every dataset with a
-// source col — i.e. not the virtual IOU/All Time), sorted 🥇→🥈→💩.
+// source col — i.e. not the virtual IOU/All Time).
 function accumulatedMedals(){
-  const ORDER = { '🥇': 0, '🥈': 1, '💩': 2 };
   const acc = new Map();   // name -> [medal chars]
   datasets.forEach((d, ci) => {
     if(d.col === undefined) return;
@@ -606,7 +620,7 @@ function accumulatedMedals(){
     }
   });
   const out = new Map();
-  for(const [name, arr] of acc){ arr.sort((a, b) => ORDER[a] - ORDER[b]); out.set(name, arr.join('')); }
+  for(const [name, arr] of acc) out.set(name, medalString(arr));
   return out;
 }
 
@@ -626,15 +640,37 @@ function renderTable(){
   document.getElementById('tableCard').classList.remove('d-none');
 }
 
+// Best-effort sort key for a ledger date string. Handles ISO / M-D-Y via native
+// Date.parse, plus the spreadsheet's "D-Mon" / "Mon-D" (+ optional year) form.
+// Unparseable -> -Infinity (sorts last when newest-first).
+const MONTHS = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+function txnDateKey(s){
+  if(!s) return -Infinity;
+  s = String(s).trim();
+  const native = Date.parse(s);
+  if(!isNaN(native)) return native;
+  let day = null, mon = null, year = 2000;
+  for(const p of s.split(/[-/\s.]+/).filter(Boolean)){
+    const m = p.toLowerCase().slice(0, 3);
+    if(m in MONTHS) mon = MONTHS[m];
+    else if(/^\d{4}$/.test(p)) year = +p;
+    else if(/^\d{1,2}$/.test(p)){ if(day === null) day = +p; else year = 2000 + +p; }
+  }
+  return (mon === null || day === null) ? -Infinity : new Date(year, mon, day).getTime();
+}
+
 // Transactions ledger table (second bootstrap-table). Name chips reuse the
-// per-person colors so they match the Balances table + graph nodes.
+// per-person colors so they match the Balances table + graph nodes. Rows are
+// shown newest-first; the body is capped to ~10 rows then scrolls (see CSS).
 function initTxnTable(){
   $('#txnTable').bootstrapTable({
     classes: 'table align-middle m-0',
+    sortName: 'date', sortOrder: 'desc',
     columns: [
       { field: 'from', title: 'From', sortable: true, formatter: nameChip },
       { field: 'to',   title: 'To',   sortable: true, formatter: nameChip },
-      { field: 'date', title: 'Date', sortable: true, class: 'text-secondary' },
+      { field: 'date', title: 'Date', sortable: true, class: 'text-secondary',
+        sorter: (a, b) => txnDateKey(a) - txnDateKey(b) },
       { field: 'amount', title: 'Amount', align: 'right', valign: 'middle', sortable: true,
         sorter: (a, b) => a - b,
         formatter: v => `<span class="fw-bold">${moneyWhole(v)}</span>` }
@@ -831,10 +867,7 @@ function showDataset(idx){
   people.sort((a, b) => b.balance - a.balance);
   const pot = totalPot();
   people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
-  document.querySelectorAll('#dsToggle button').forEach((b, i) => {
-    b.classList.toggle('btn-primary', i === idx);
-    b.classList.toggle('btn-outline-secondary', i !== idx);
-  });
+  markActiveDataset(idx);
 
   renderTable();
   const net = people.reduce((a, p) => a + p.balance, 0);
@@ -895,21 +928,70 @@ function renderTxnGraph(){
   renderGraph(edges);
 }
 
+const MAX_DATED_PILLS = 5;   // dated pills before the rest collapse into "More …"
+
 function renderDatasetToggle(){
   const el = document.getElementById('dsToggle');
   el.innerHTML = '';
   el.classList.toggle('d-none', datasets.length <= 1);   // no toggle for a single column
-  datasets.forEach((d, i) => {
+
+  const mkPill = (i, cta) => {
     const b = document.createElement('button');
     b.type = 'button';
-    // computed columns (IOU / All Time, no source col) are larger CTA pills;
-    // the dated snapshots stay smaller
-    const cta = d.col === undefined;
+    b.dataset.ds = i;
+    // computed columns (IOU / All Time, no source col) are larger CTA pills
     b.className = 'btn rounded-pill btn-outline-secondary' + (cta ? ' ds-cta' : ' btn-sm');
-    b.textContent = d.label;
+    b.textContent = datasets[i].label;
     b.addEventListener('click', () => { userPicked = true; showDataset(i); });
-    el.appendChild(b);
+    return b;
+  };
+
+  // computed columns (IOU / All Time) first, as CTA pills
+  datasets.forEach((d, i) => { if(d.col === undefined) el.appendChild(mkPill(i, true)); });
+
+  // dated columns rightmost-first (latest first); up to MAX_DATED_PILLS, rest in "More"
+  const dated = datasets.map((d, i) => i).filter(i => datasets[i].col !== undefined).reverse();
+  const overflow = dated.length > MAX_DATED_PILLS ? dated.slice(MAX_DATED_PILLS) : [];
+  (overflow.length ? dated.slice(0, MAX_DATED_PILLS) : dated).forEach(i => el.appendChild(mkPill(i, false)));
+
+  if(overflow.length){
+    const dd = document.createElement('div');
+    dd.className = 'dropdown';
+    dd.id = 'dsMore';
+    dd.innerHTML =
+      '<button type="button" class="btn btn-sm rounded-pill btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">More</button>' +
+      '<ul class="dropdown-menu dropdown-menu-end"></ul>';
+    const ul = dd.querySelector('ul');
+    overflow.forEach(i => {
+      const it = document.createElement('button');
+      it.type = 'button';
+      it.dataset.ds = i;
+      it.className = 'dropdown-item';
+      it.textContent = datasets[i].label;
+      it.addEventListener('click', () => { userPicked = true; showDataset(i); });
+      const li = document.createElement('li');
+      li.appendChild(it);
+      ul.appendChild(li);
+    });
+    el.appendChild(dd);
+  }
+}
+
+// Highlight the selected dataset across the pills + the "More" dropdown.
+function markActiveDataset(idx){
+  document.querySelectorAll('#dsToggle [data-ds]').forEach(b => {
+    const on = +b.dataset.ds === idx;
+    if(b.classList.contains('dropdown-item')) b.classList.toggle('active', on);
+    else { b.classList.toggle('btn-primary', on); b.classList.toggle('btn-outline-secondary', !on); }
   });
+  const more = document.getElementById('dsMore');
+  if(more){
+    const sel = more.querySelector(`.dropdown-item[data-ds="${idx}"]`);
+    const tgl = more.querySelector('.dropdown-toggle');
+    tgl.classList.toggle('btn-primary', !!sel);
+    tgl.classList.toggle('btn-outline-secondary', !sel);
+    tgl.textContent = sel ? datasets[idx].label : 'More';   // show the picked one on the toggle
+  }
 }
 
 function main(){
