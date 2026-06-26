@@ -275,6 +275,17 @@ function textOn(bg){
   const lum = (0.299*c.r + 0.587*c.g + 0.114*c.b) / 255;
   return lum > 0.6 ? '#111111' : '#ffffff';
 }
+// Green/red for a signed amount, drawn on the chip's "groove"-colored backing pill
+// (textOn(fill) — white on a dark chip, black on a light one; see buildDot). The
+// pill is always white or black, so we just pick the shade that reads on it: a dark
+// green/red on the white pill, a bright one on the black pill. Never red-on-red /
+// green-on-green. Exact $0 has no win/loss color → a neutral gray.
+function moneyColorOn(pill, v){
+  const light = d3.color(pill).rgb().r > 128;   // pill is #ffffff (white) or #111111 (black)
+  if(Math.abs(v) <= EPS) return light ? '#475569' : '#cbd5e1';
+  return v < 0 ? (light ? '#b91c1c' : '#f87171')   // red:   dark on white, bright on black
+               : (light ? '#15803d' : '#4ade80');  // green: dark on white, bright on black
+}
 const esc = s => String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
 
 /* ===================== SETTLEMENT ALGORITHM ===================== */
@@ -508,7 +519,7 @@ function buildDot(transfers){
   const shown = graphNodes;
   const NAME_PT = 14;
   const maxChars = Math.max(3, ...shown.map(p => p.name.length));
-  const diameter = Math.max(1.0, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.25).toFixed(2);
+  const diameter = Math.max(1.3, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.6).toFixed(2);
   let dot = 'digraph G {\n';
   dot += `  bgcolor="transparent"; rankdir=${rankdir}; pad=0.2; nodesep=0.5; ranksep=0.8;\n`;
   dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${fontname}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
@@ -516,8 +527,18 @@ function buildDot(transfers){
   for(const p of shown){
     let lbl;
     if(graphMode === 'balances'){
-      const emojiRow = p.emoji ? `${p.emoji}<BR/>` : '';   // emojis on their own top row
-      lbl = `<${emojiRow}${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneySigned(p.balance))}</FONT>>`;
+      // HTML-like table label: emoji / name rows in the node's on-fill color, then
+      // the $amount green/red on a small rounded "groove"-colored (white/black)
+      // backing pill — a nested 1-cell table so the pill hugs the text.
+      const groove = textOn(p.color);                      // chip groove color (white/black)
+      const emojiRow = p.emoji ? `<TR><TD>${p.emoji}</TD></TR>` : '';
+      const amt = `<FONT POINT-SIZE="8" COLOR="${moneyColorOn(groove, p.balance)}"> ${escapeHtml(moneySigned(p.balance))} </FONT>`;
+      const pill = `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="${groove}" STYLE="ROUNDED"><TR><TD>${amt}</TD></TR></TABLE>`;
+      lbl = `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">`
+          + emojiRow
+          + `<TR><TD>${escapeHtml(p.name)}</TD></TR>`
+          + `<TR><TD>${pill}</TD></TR>`
+          + `</TABLE>>`;
     }else{
       lbl = `<${escapeHtml(p.name)}>`;                      // ledger graph: name only
     }
