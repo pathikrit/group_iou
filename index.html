@@ -31,9 +31,15 @@
   #pane-txn .fixed-table-body{max-height:32rem;overflow:auto}
   #txnTable thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
 
+  /* Balances/Transactions tables a touch larger than the Bootstrap default (name
+     chips are em-based, so they scale with it and stay proportionate). */
+  #pane-bal table, #pane-txn table{font-size:1.1rem}
+
   /* graph (Graphviz SVG internals — no Bootstrap equivalent). The SVG drives its
-     own height (height:auto, scaled to fit width), so no hardcoded min-height. */
-  #graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
+     own height (height:auto, scaled to fit width), so no hardcoded min-height.
+     Cap the width so chips don't balloon on a wide desktop (centered via margin);
+     on mobile it stays under the cap, so it just fits the width — no h-scroll. */
+  #graph svg{max-width:min(100%,40rem);height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -462,7 +468,6 @@ function greedyTree(g){
 }
 
 /* ===================== RENDERING ===================== */
-const MOBILE_MQ = window.matchMedia('(max-width: 768px)');   // mobile = stacked graph
 let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
@@ -489,9 +494,9 @@ function nameChip(name){
 
 function buildDot(transfers){
   const fontname = "Helvetica,Arial,sans-serif";
-  // top-to-bottom on phones so the graph fills the tall screen (and scales up,
-  // rather than a wide left-to-right graph shrinking to fit the narrow width)
-  const rankdir = MOBILE_MQ.matches ? 'TB' : 'LR';
+  // always left-to-right (the "desktop" layout); on mobile the SVG just scales
+  // down to fit the narrow width (max-width:100%), so no horizontal scrolling
+  const rankdir = 'LR';
   // one uniform diameter for every node, sized to fit the longest name (so all
   // circles match AND nothing clips). ~0.6em avg glyph; /0.78 to fit a line in a
   // circle; +padding.
@@ -1158,8 +1163,6 @@ function main(){
   document.getElementById('graph').addEventListener('click', e => {
     if(!e.target.closest('g.node')) clearSelection();
   });
-  // re-render the graph when crossing the mobile breakpoint (LR <-> TB)
-  MOBILE_MQ.addEventListener('change', () => { if(graphNodes.length) renderGraph(currentTransfers); });
   // the Transfers graph follows the active tab: Balances -> settlement graph,
   // Transactions -> raw transfer-ledger graph
   document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
