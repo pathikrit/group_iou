@@ -103,7 +103,10 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
   `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
   (URL + iframe). **Transfers** card just shows the graph (no tabs) — no textual
-  transfer list, graph only.
+  transfer list, graph only. It's **never shown while the Input tab is active**: the
+  `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal goes through
+  `showGraphCard()` which no-ops when `#tab-input` is `.active` — so re-renders (e.g.
+  toggling poker mode) can't pop it back open. The bal/txn tabs re-render & re-show.
 - **The Transfers graph follows the active tab** (`graphMode`, switched by
   `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
   graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on
@@ -134,7 +137,13 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `tableMedal` delegate to, so no caller branches on `pokerMode`; magnitude/👻/🤷
   emojis stay; (2) no Average column and All Time sorts by balance like a dated
   column (`showAverage = isAllTime && pokerMode`); (3) `moneySigned` shows plain
-  `+`/`-` signs instead of the triangles.
+  `+`/`-` signs instead of the triangles. Conversely, **when on**, `renderGraph`
+  calls `decoratePokerChips(svg)` to overlay each node circle with **poker-chip edge
+  spots** — 8 chunky contrasting arcs (a wide `stroke-dasharray` circle) just inside
+  the rim + a thin inner "face" ring, both `stroke=textOn(fill)`. Drawn in raw SVG
+  (Graphviz can't do chunky segments — its `dashed` looks like fine stitching),
+  inserted between the ellipse and the text so name/amount stay readable; re-applied
+  on every render since the SVG is regenerated.
 - Amounts (balances + transfers + Average) display in whole **dollars**
   (`moneyWhole`, rounded, no cents); Average keeps full precision for sorting.
   Signed balances (table Balance/Average + graph node $) use `moneySigned`: in poker

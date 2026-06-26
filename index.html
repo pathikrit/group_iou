@@ -541,9 +541,13 @@ function renderGraph(transfers){
     document.getElementById('graph').innerHTML =
       '<p class="text-danger m-0">Could not render graph: ' + msg + '</p>';
   });
+  // strip our injected chip decorations first: d3-graphviz diffs the existing SVG
+  // against the new render and crashes on children it didn't create (no bound datum)
+  d3.selectAll('#graph .chip-deco').remove();
   gv.renderDot(dot, () => {
     const svg = d3.select('#graph svg');
     svg.attr('width', '100%').attr('height', null);
+    if(pokerMode) decoratePokerChips(svg);
     // make rows able to highlight nodes (re-bind because SVG is regenerated)
     d3.selectAll('#graph g.node').style('cursor', 'pointer').on('click', function(){
       const id = this.getAttribute('id');
@@ -551,6 +555,35 @@ function renderGraph(transfers){
       if(p) selectPerson(p.nodeId);
     });
     applyGraphSelection();
+  });
+}
+
+// Poker mode: overlay each node circle with poker-chip edge spots — a ring of a few
+// chunky contrasting blocks (a wide dashed stroke) plus a thin inner "face" ring.
+// Drawn just inside the rim, between the fill and the label, so name/amount stay
+// fully readable. (Graphviz can't do the chunky-segment look, so we draw it in SVG.)
+const SVGNS = 'http://www.w3.org/2000/svg';
+function decoratePokerChips(svg){
+  svg.selectAll('g.node').each(function(){
+    const ell = this.querySelector('ellipse');
+    if(!ell) return;
+    const cx = +ell.getAttribute('cx'), cy = +ell.getAttribute('cy'), r = +ell.getAttribute('rx');
+    const rim = textOn(ell.getAttribute('fill') || '#888');   // contrast w/ fill: white on dark, black on light
+    const before = ell.nextSibling;   // keep decorations under the text nodes
+    const circle = (radius, width, dash) => {
+      const c = document.createElementNS(SVGNS, 'circle');
+      c.setAttribute('class', 'chip-deco');   // tagged so renderGraph can strip before graphviz re-diffs
+      c.setAttribute('cx', cx); c.setAttribute('cy', cy); c.setAttribute('r', radius);
+      c.setAttribute('fill', 'none'); c.setAttribute('stroke', rim); c.setAttribute('stroke-width', width);
+      if(dash){ c.setAttribute('stroke-dasharray', dash); c.setAttribute('stroke-linecap', 'butt'); }
+      this.insertBefore(c, before);
+    };
+    // chunky edge blocks: 8 arcs of a wide stroke, sitting just inside the edge
+    const NBLOCKS = 8, band = r * 0.2, rRim = r - band / 2 - 1;
+    const seg = 2 * Math.PI * rRim / NBLOCKS;
+    circle(rRim, band, `${(seg * 0.5).toFixed(2)} ${(seg * 0.5).toFixed(2)}`);
+    // thin inner ring marking the chip's center face
+    circle(r * 0.6, Math.max(1.5, r * 0.025));
   });
 }
 
@@ -954,8 +987,16 @@ function showDataset(idx){
     return;
   }
   setStatus('', '');
-  document.getElementById('settleCard').classList.remove('d-none');
+  showGraphCard();
   renderBalGraph();
+}
+
+// Reveal the Transfers graph card — but NEVER while the Input tab is active (the
+// graph is irrelevant there, and re-renders, e.g. toggling poker mode, must not pop
+// it back open).
+function showGraphCard(){
+  if(document.getElementById('tab-input').classList.contains('active')) return;
+  document.getElementById('settleCard').classList.remove('d-none');
 }
 
 // Settlement graph for the selected balances column (Constraints 1-3).
@@ -970,7 +1011,7 @@ function renderBalGraph(){
   graphMode = 'balances';
   graphNodes = people;
   document.getElementById('netToggleWrap').classList.replace('d-flex', 'd-none');
-  document.getElementById('settleCard').classList.remove('d-none');
+  showGraphCard();
   renderGraph(computeTransfers(people).transfers);
 }
 
@@ -1019,7 +1060,7 @@ function renderTxnGraph(){
   document.getElementById('netToggleWrap').classList.replace('d-none', 'd-flex');
   const { nodes, edges } = txnGraphData(txnNet);
   graphNodes = nodes;
-  document.getElementById('settleCard').classList.remove('d-none');
+  showGraphCard();
   renderGraph(edges);
 }
 
@@ -1123,6 +1164,10 @@ function main(){
   // Transactions -> raw transfer-ledger graph
   document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
   document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderTxnGraph);
+  // the Transfers graph is irrelevant on the Input tab — hide it there (the bal/txn
+  // tabs re-render and re-show it when you switch back)
+  document.getElementById('tab-input').addEventListener('shown.bs.tab',
+    () => document.getElementById('settleCard').classList.add('d-none'));
   // Net toggle re-renders the (transactions) graph: net vs both-directions
   document.getElementById('netToggle').addEventListener('change', e => {
     txnNet = e.target.checked;
