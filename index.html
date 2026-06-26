@@ -8,10 +8,11 @@
 <!-- All dependencies inline from CDN with pinned versions (see CLAUDE.md) -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.css" rel="stylesheet">
-<!-- Ewert: western/casino display face for the poker-chip text (poker mode only) -->
+<!-- Fonts: Inter = financial/UI face (non-poker, everywhere); Special Elite = fun
+     typewriter-ledger face (poker UI: tabs/table/edges); Ewert + Rye = poker chips. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Ewert&family=Rye&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Ewert&family=Inter:wght@400;500;600;700&family=Rye&family=Special+Elite&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.js"></script>
@@ -28,6 +29,14 @@
      which blows up the HTML relative to the fixed-size SVG graph. */
   html{ -webkit-text-size-adjust:100%; text-size-adjust:100%; }
   [data-bs-theme="dark"]{ --bs-body-bg:#0f1115; --bs-body-color:#e7e9ee; --bs-border-color:#2a2f3a; }
+  /* App font follows the mode (set on <body> via .poker-ui by setPokerMode): Inter
+     (financial/UI) normally, Special Elite (fun typewriter-ledger) in poker mode. The
+     whole app inherits this through Bootstrap's --bs-body-font-family hook. Numbers use
+     tabular figures so they align like a statement. */
+  body{ --bs-body-font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+        font-variant-numeric:tabular-nums; }
+  body.poker-ui{ --bs-body-font-family:'Special Elite','Inter',monospace; }
+  body.poker-ui #appTitle{ font-family:'Rye','Special Elite',cursive; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
 
@@ -44,6 +53,9 @@
      Cap the width so chips don't balloon on a wide desktop (centered via margin);
      on mobile it stays under the cap, so it just fits the width — no h-scroll. */
   #graph svg{max-width:min(100%,54rem);height:auto;display:block;margin:0 auto}
+  /* let chips be dragged on touch screens: stop the browser from treating a
+     touch-drag on a chip as a page scroll/zoom (otherwise d3-drag never fires) */
+  #graph g.node{touch-action:none;-webkit-tap-highlight-color:transparent}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -178,6 +190,7 @@ function setTitle(name){
 function setPokerMode(on){
   pokerMode = on;
   document.getElementById('pokerToggle').checked = on;
+  document.body.classList.toggle('poker-ui', on);   // swaps the app font (Inter <-> Special Elite)
   if(people.length){
     // node emojis are cached on each person (showDataset) — recompute so the rank
     // medals/crown appear/disappear with the mode
@@ -237,6 +250,14 @@ function moneySigned(v){
   const prefix = pokerMode ? (r > 0 ? '▲' : r < 0 ? '▼' : '')
                            : (r > 0 ? '+' : r < 0 ? '-' : '');
   return prefix + '$' + Math.abs(r);
+}
+// Table HTML for a signed amount: in poker mode the ▲/▼ glyph crowds the number in the
+// display font, so put a small gap after it. (The graph chip handles its own spacing.)
+function moneySignedCell(v){
+  const s = moneySigned(v);
+  if(!pokerMode) return s;                       // +/- reads fine tight
+  const i = s.indexOf('$');
+  return i > 0 ? `<span style="margin-right:.18em">${s.slice(0, i)}</span>${s.slice(i)}` : s;
 }
 
 // The "pot" = total money that changed hands = sum of the positive balances
@@ -488,7 +509,7 @@ let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
 let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
-let ewertChecked = false;    // one-shot: re-render poker chips once the Ewert font loads
+let fontChecked = false;     // one-shot: re-render chips once the web fonts finish loading
 let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual IOU/All Time)
@@ -509,7 +530,9 @@ function nameChip(name){
 }
 
 function buildDot(transfers){
-  const fontname = "Helvetica,Arial,sans-serif";
+  // graph font follows the mode: edges + non-poker chip labels use Inter (financial)
+  // / Special Elite (poker fun). Poker chip text itself is Ewert/Rye (drawChipText).
+  const fontname = pokerMode ? "Special Elite" : "Inter";
   // always left-to-right (the "desktop" layout); on mobile the SVG just scales
   // down to fit the narrow width (max-width:100%), so no horizontal scrolling
   const rankdir = 'LR';
@@ -550,32 +573,12 @@ function buildDot(transfers){
   dot += `  bgcolor="transparent"; rankdir=${rankdir}; pad=0.2; nodesep=0.5; ranksep=0.8;\n`;
   dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${nodeFont}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=${edgeFs}, color="#8a93a5", fontcolor="#cfd6e4", penwidth=${edgePen}, arrowsize=${arrowSc}];\n`;
+  // Every node gets an EMPTY label — we draw the emoji/name/$ ourselves in SVG
+  // (drawChipLabels) for BOTH modes. Graphviz lays out HTML labels with its own font
+  // metrics, which don't match the web fonts (Inter/Ewert) → off-center text & a
+  // mis-sized/clipped $ pill. The empty label still reserves the fixed-size circle.
   for(const p of shown){
-    let lbl;
-    if(pokerMode){
-      // Poker chips (both the settlement AND the transactions graph): Graphviz lays out
-      // HTML labels with its own font metrics, which don't match the Ewert web font →
-      // off-center text & a mis-sized $ pill. So we emit NO label here and draw the
-      // emoji/name/$ ourselves, perfectly centered, in decoratePokerChips (drawChipText).
-      // The empty label still reserves the circle.
-      lbl = '""';
-    }else if(graphMode === 'balances'){
-      // HTML-like table label: emoji / name rows in the node's on-fill color, then
-      // the $amount green/red on a small rounded "groove"-colored (white/black)
-      // backing pill — a nested 1-cell table so the pill hugs the text.
-      const groove = textOn(p.color);                      // chip groove color (white/black)
-      const emojiRow = p.emoji ? `<TR><TD ALIGN="CENTER">${p.emoji}</TD></TR>` : '';
-      const amt = `<FONT POINT-SIZE="13" COLOR="${moneyColorOn(groove, p.balance)}"> ${escapeHtml(moneySigned(p.balance))} </FONT>`;
-      const pill = `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="${groove}" STYLE="ROUNDED"><TR><TD ALIGN="CENTER">${amt}</TD></TR></TABLE>`;
-      lbl = `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0" ALIGN="CENTER">`
-          + emojiRow
-          + `<TR><TD ALIGN="CENTER">${escapeHtml(p.name)}</TD></TR>`
-          + `<TR><TD ALIGN="CENTER">${pill}</TD></TR>`
-          + `</TABLE>>`;
-    }else{
-      lbl = `<${escapeHtml(p.name)}>`;                      // ledger graph: name only
-    }
-    dot += `  "${esc(p.name)}" [id="${p.nodeId}", label=${lbl}, fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
+    dot += `  "${esc(p.name)}" [id="${p.nodeId}", label="", fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
   }
   transfers.forEach((t, i) => {
     dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
@@ -606,15 +609,16 @@ function renderGraph(transfers){
   gv.renderDot(dot, () => {
     const svg = d3.select('#graph svg');
     svg.attr('width', '100%').attr('height', null);
-    if(pokerMode) decoratePokerChips(svg);
+    if(pokerMode) decoratePokerChips(svg);   // poker-chip rings (poker only)
+    drawChipLabels(svg);                      // centered emoji/name/$ text (both modes)
     // let chips be dragged around (and click-to-highlight when not dragged)
     enableNodeDrag(svg);
     applyGraphSelection();
     // chip text auto-fits via getComputedTextLength, so it must be measured with the
-    // real Ewert font: re-render once after the web font finishes loading (one-shot).
-    if(pokerMode && !ewertChecked && document.fonts && document.fonts.ready){
-      ewertChecked = true;
-      document.fonts.ready.then(() => { if(pokerMode && currentTransfers) renderGraph(currentTransfers); });
+    // real web font (Inter/Ewert): re-render once after fonts finish loading (one-shot).
+    if(!fontChecked && document.fonts && document.fonts.ready){
+      fontChecked = true;
+      document.fonts.ready.then(() => { if(currentTransfers) renderGraph(currentTransfers); });
     }
   });
 }
@@ -645,22 +649,33 @@ function decoratePokerChips(svg){
     circle(rRim, band, `${(seg * 0.5).toFixed(2)} ${(seg * 0.5).toFixed(2)}`);
     // thin inner ring marking the chip's center face
     circle(r * 0.6, Math.max(1.5, r * 0.025));
-
-    // Draw the label ourselves (the DOT label is empty in poker mode) so it's exactly
-    // centered and the $ pill fits — text-anchor=middle at the node center. Works for
-    // both the settlement graph and the transactions graph (which is name-only).
-    const person = graphNodes.find(p => p.nodeId === this.getAttribute('id'));
-    if(person) drawChipText(this, person, cx, cy, r, ell.getAttribute('fill') || '#888');
   });
 }
 
-// Centered emoji / name / $-pill for a poker chip, drawn in raw SVG (see above).
+// Draw the node label ourselves (the DOT label is empty) so it's exactly centered and
+// the $ pill fits — text-anchor=middle at the node center. Both modes & both graphs.
+function drawChipLabels(svg){
+  svg.selectAll('g.node').each(function(){
+    const ell = this.querySelector('ellipse'); if(!ell) return;
+    const person = graphNodes.find(p => p.nodeId === this.getAttribute('id'));
+    if(!person) return;
+    drawChipText(this, person, +ell.getAttribute('cx'), +ell.getAttribute('cy'),
+                 +ell.getAttribute('rx'), ell.getAttribute('fill') || '#888');
+  });
+}
+
+// Centered emoji / name / $-pill for a chip, drawn in raw SVG (see above). Fonts
+// follow the mode: poker = Ewert name + Rye number; plain = Inter throughout.
 const EWERT_STACK = "'Ewert', Helvetica, Arial, sans-serif";
+const RYE_STACK   = "'Rye', Helvetica, Arial, sans-serif";
+const INTER_STACK = "'Inter', Helvetica, Arial, sans-serif";
 const CLEAN_STACK = "Helvetica, Arial, sans-serif";   // ▲/▼ prefix (geometric glyph)
-const RYE_STACK   = "'Rye', Helvetica, Arial, sans-serif";   // the $number only
 const EMOJI_STACK = "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
 function drawChipText(g, person, cx, cy, r, fill){
   const groove = textOn(fill);
+  const nameFont = pokerMode ? EWERT_STACK : INTER_STACK;
+  const numFont  = pokerMode ? RYE_STACK   : INTER_STACK;
+  const preFont  = pokerMode ? CLEAN_STACK : INTER_STACK;   // poker ▲/▼ clean; plain +/- in Inter
   const mk = (txt, family, size, color, yc, weight) => {
     const t = document.createElementNS(SVGNS, 'text');
     t.setAttribute('class', 'chip-deco');
@@ -673,23 +688,25 @@ function drawChipText(g, person, cx, cy, r, fill){
     return t;
   };
   // name — auto-fit to ~1.1r wide (inside the 0.6r face ring), capped in height
-  const name = mk(person.name, EWERT_STACK, r * 0.30, groove, cy);
+  const name = mk(person.name, nameFont, r * 0.30, groove, cy);
   const w = name.getComputedTextLength() || 1;
   name.setAttribute('font-size', Math.min(r * 0.30 * (r * 1.10) / w, r * 0.40));
   // emoji row above, $ pill below — only when present (the txn graph is name-only)
   if(person.emoji) mk(person.emoji, EMOJI_STACK, r * 0.20, groove, cy - r * 0.34);
   if(Number.isFinite(person.balance)){
-    // ▲/▼ prefix in a clean font (geometric glyph), the $number in Rye
+    // prefix (▲/▼ or +/-) then the $number, as two tspans with a small gap between
     const s = moneySigned(person.balance), i = s.indexOf('$');
-    const amt = mk('', CLEAN_STACK, r * 0.15, moneyColorOn(groove, person.balance), cy + r * 0.34, 'bold');
-    const span = (txt, family) => {
+    const amt = mk('', numFont, r * 0.15, moneyColorOn(groove, person.balance), cy + r * 0.34, 'bold');
+    const span = (txt, family, dx) => {
       if(!txt) return;
       const ts = document.createElementNS(SVGNS, 'tspan');
-      ts.setAttribute('font-family', family); ts.textContent = txt;
+      ts.setAttribute('font-family', family);
+      if(dx) ts.setAttribute('dx', dx);
+      ts.textContent = txt;
       amt.appendChild(ts);
     };
-    span(s.slice(0, i), CLEAN_STACK);             // ▲/▼ (or +/-)
-    span(s.slice(i), RYE_STACK);                  // $number
+    span(s.slice(0, i), preFont);                 // ▲/▼ (or +/-)
+    span(s.slice(i), numFont);                    // $number
     const bb = amt.getBBox();                     // size the pill to the actual number
     const px = r * 0.08, py = r * 0.02;
     const rect = document.createElementNS(SVGNS, 'rect');
@@ -854,7 +871,7 @@ function initBalTable(){
         sorter: (a, b) => a - b,
         formatter: v => {
           const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneySigned(v)}</span>`;
+          return `<span class="fw-bold ${c}">${moneySignedCell(v)}</span>`;
         } },
       // Average = balance ÷ times seen; shown only for the All Time column (see renderTable)
       { field: 'average', title: 'Average', align: 'right', valign: 'middle', sortable: true, visible: false,
@@ -862,7 +879,7 @@ function initBalTable(){
         formatter: v => {
           if(v == null) return '';
           const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneySigned(v)}</span>`;   // nearest dollar, no cents
+          return `<span class="fw-bold ${c}">${moneySignedCell(v)}</span>`;   // nearest dollar, no cents
         } }
     ],
     sortName: 'amount', sortOrder: 'desc',
