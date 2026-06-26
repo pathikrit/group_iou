@@ -4,8 +4,17 @@ Zero-backend single-page app: reads a published Google Sheet of net balances and
 draws the fewest money transfers to settle up, as an interactive DOT graph.
 
 ## ⛔ RULES
-- **Never `git commit`/`push` without an explicit go-ahead each time.** (Editing
-  files freely is fine.)
+- **NEVER run `git commit`, `git push`, `git reset`, `git revert`, or any other git
+  write/history command unless the user, in their MOST RECENT message, explicitly
+  told you to.** Editing files locally is always fine; touching git is not.
+  - An explicit instruction means the current message literally says so (e.g.
+    "commit", "commit & push", "push"). If it doesn't, you do NOT have permission —
+    finish the edits and STOP, then say the changes are ready and ask whether to commit.
+  - **Each git instruction is single-use and applies ONLY to that one turn.** A
+    "commit & push" three messages ago (or anywhere earlier in the chat) is NOT
+    standing permission — those were one-off checkpoints, not a default workflow.
+    Do not infer "they'll probably want this pushed." When unsure, the answer is no.
+  - This is the #1 rule. A pattern of prior pushes never overrides it.
 - **Only these files may exist:** `index.html` (whole app — HTML+CSS+JS inline,
   all deps from pinned CDNs), `.github/workflows/deploy.yml`, `CLAUDE.md`, `.git/`.
   NO other files.
@@ -115,8 +124,23 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `seenCount` = #dated columns the person appears in; shown via bootstrap-table
   `showColumn`/`hideColumn`), and the **highest-average person gets a 👑** prefixed
   to their medal suffix.
+- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Load in the
+  **Input** tab): a win/loss framing, on by default when the **sheet
+  title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`
+  (mirrors `userPicked`), and `setPokerMode` syncs the switch + re-renders the table
+  & balance graph. When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
+  crown) anywhere — the single gate is **`rankEmoji(rank,count,gold)`** (returns ''
+  unless poker; `gold` = 👑 in the graph, 🥇 in the table), which both `emojiFor` and
+  `tableMedal` delegate to, so no caller branches on `pokerMode`; magnitude/👻/🤷
+  emojis stay; (2) no Average column and All Time sorts by balance like a dated
+  column (`showAverage = isAllTime && pokerMode`); (3) `moneySigned` shows plain
+  `+`/`-` signs instead of the triangles.
 - Amounts (balances + transfers + Average) display in whole **dollars**
   (`moneyWhole`, rounded, no cents); Average keeps full precision for sorting.
+  Signed balances (table Balance/Average + graph node $) use `moneySigned`: in poker
+  mode a **text-glyph ▲/▼** prefix (not emoji, so it inherits the number's color —
+  green up / red down in the table); otherwise `+`/`-` (positives get a `+`). Exact
+  $0 gets no prefix. Transfer/ledger amounts stay unsigned (`moneyWhole`).
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
   Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
   the tier is chosen by the balance as a **% of the pot** (`totalPot` = sum of

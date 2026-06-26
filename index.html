@@ -81,9 +81,15 @@
           <table id="txnTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-input" role="tabpanel">
-          <div class="input-group input-group-lg mb-3">
-            <input id="dbInput" type="text" class="form-control" spellcheck="false" placeholder="Published Google Sheet URL …/pubhtml?gid=0&single=true" />
-            <button id="dbLoad" class="btn btn-primary" type="button">Load</button>
+          <div class="d-flex align-items-center gap-3 mb-3">
+            <div class="input-group input-group-lg flex-grow-1">
+              <input id="dbInput" type="text" class="form-control" spellcheck="false" placeholder="Published Google Sheet URL …/pubhtml?gid=0&single=true" />
+              <button id="dbLoad" class="btn btn-primary" type="button">Load</button>
+            </div>
+            <div class="form-check form-switch m-0 flex-shrink-0 fs-4">
+              <input class="form-check-input" type="checkbox" role="switch" id="pokerToggle" title="Poker mode">
+              <label class="form-check-label" for="pokerToggle">🃏</label>
+            </div>
           </div>
           <div class="ratio" style="--bs-aspect-ratio:70%">
             <iframe id="srcFrame" class="rounded border-0 bg-white" title="Source sheet" loading="lazy"></iframe>
@@ -117,6 +123,14 @@ const PALETTE = d3.schemeTableau10;   // categorical colors for names
 const MAX_EXACT_N = 15;     // exact partition DP up to this many active people
 const MAX_TREE_S  = 8;      // exact spanning-tree search up to this group size
 
+// Poker mode: win/loss framing — medal & crown emojis, the All Time Average column,
+// and 🔺/🔻 balances. Default on when the sheet title mentions "poker"; off means a
+// plain ledger (no medals/crowns/averages, +/- signed balances). The toggle is the
+// poker-chip button in the header. pokerUserSet sticks the user's manual choice so a
+// later title refresh doesn't override it (mirrors `userPicked`).
+let pokerMode = false;
+let pokerUserSet = false;
+
 /* ===================== URL / DATA HELPERS ===================== */
 // Turn a published "pubhtml" URL into a CSV endpoint (served with permissive CORS).
 function toCsvUrl(u){
@@ -143,7 +157,25 @@ async function fetchSheetCsv(csvUrl){
 // on any failure we just keep the default heading.
 function setTitle(name){
   // heading shows the sheet name; the document <title> stays "Group IOU"
-  document.getElementById('appTitle').textContent = (name || '').trim() || 'Group IOU';
+  const t = (name || '').trim();
+  document.getElementById('appTitle').textContent = t || 'Group IOU';
+  // default poker mode from the title (unless the user has toggled it manually)
+  if(!pokerUserSet) setPokerMode(/poker/i.test(t));
+}
+
+// Set poker mode + sync the Input-tab switch and (if data is loaded) re-render the
+// dependent views.
+function setPokerMode(on){
+  pokerMode = on;
+  document.getElementById('pokerToggle').checked = on;
+  if(people.length){
+    // node emojis are cached on each person (showDataset) — recompute so the rank
+    // medals/crown appear/disappear with the mode
+    const pot = totalPot();
+    people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
+    renderTable();
+    if(graphMode === 'balances') renderBalGraph();
+  }
 }
 async function fetchSheetTitle(pubUrl){
   try{
@@ -185,21 +217,41 @@ function moneyWhole(v){
   const r = Math.round(v);
   return (r < 0 ? '-$' : '$') + Math.abs(r);
 }
+// signed whole-dollar display. Poker mode: a financial-style up/down triangle
+// (▲ owed to you, ▼ you owe). These are text glyphs (not emoji) so they inherit the
+// surrounding color — green up / red down in the table, the node color in the graph
+// — matching the number. Otherwise a plain +/- sign (positives get a +). Exact $0
+// gets no prefix either way.
+function moneySigned(v){
+  const r = Math.round(v);
+  const prefix = pokerMode ? (r > 0 ? '▲' : r < 0 ? '▼' : '')
+                           : (r > 0 ? '+' : r < 0 ? '-' : '');
+  return prefix + '$' + Math.abs(r);
+}
 
 // The "pot" = total money that changed hands = sum of the positive balances
 // (equals the sum of |negative| balances since the column nets to 0). Used to pick
 // emoji tiers by % of the pot, so they scale regardless of the stakes.
 const totalPot = () => people.reduce((s, p) => s + (p.balance > 0 ? p.balance : 0), 0);
 
+// Win/loss ranking emoji for a person at `rank` of `count` (best-first): winner /
+// runner-up / last place. THE single source of the poker gate — returns '' unless
+// poker mode is on, so callers (graph + table) never branch on pokerMode. `gold` is
+// the winner glyph (👑 in the graph, 🥇 in the table).
+function rankEmoji(rank, count, gold){
+  if(!pokerMode || count < 2) return '';
+  if(rank === 0) return gold;
+  if(rank === 1 && count >= 3) return '🥈';
+  if(rank === count - 1) return '💩';
+  return '';
+}
+
 // Reaction emojis for a graph node. A person can get up to two: a rank emoji
 // (winner / 2nd / last) plus a magnitude emoji. The magnitude tier is chosen by the
 // balance as a % of the pot (so it scales regardless of stakes). rank is the
 // 0-based index in the descending-by-balance list; count is the number of people.
 function emojiFor(balance, pot, rank, count){
-  let e = '';
-  if(count >= 2 && rank === 0) e += '👑';                 // winner
-  else if(count >= 3 && rank === 1) e += '🥈';            // runner-up
-  if(count >= 2 && rank === count - 1) e += '💩';         // last place
+  let e = rankEmoji(rank, count, '👑');
   if(Math.abs(balance) <= EPS) return e + '👻';           // exact $0 (present, evened out)
   const pct = pot ? Math.abs(balance) / pot * 100 : 0;    // magnitude tiers, % of pot
   if(pct < 5) e += '🤷';                                  // near-even (nonzero, either sign)
@@ -460,7 +512,7 @@ function buildDot(transfers){
     let lbl;
     if(graphMode === 'balances'){
       const emojiRow = p.emoji ? `${p.emoji}<BR/>` : '';   // emojis on their own top row
-      lbl = `<${emojiRow}${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneyWhole(p.balance))}</FONT>>`;
+      lbl = `<${emojiRow}${escapeHtml(p.name)}<BR/><FONT POINT-SIZE="8">${escapeHtml(moneySigned(p.balance))}</FONT>>`;
     }else{
       lbl = `<${escapeHtml(p.name)}>`;                      // ledger graph: name only
     }
@@ -549,12 +601,12 @@ function initBalTable(){
       { field: 'rank', title: '#', align: 'center', valign: 'middle', sortable: true, class: 'text-secondary' },
       { field: 'name', title: 'Name', sortable: true,
         formatter: (v, row) =>
-          `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' ' + row.medal : ''}` },
+          `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' <span style="white-space:nowrap">' + row.medal + '</span>' : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
         sorter: (a, b) => a - b,
         formatter: v => {
           const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneyWhole(v)}</span>`;
+          return `<span class="fw-bold ${c}">${moneySigned(v)}</span>`;
         } },
       // Average = balance ÷ times seen; shown only for the All Time column (see renderTable)
       { field: 'average', title: 'Average', align: 'right', valign: 'middle', sortable: true, visible: false,
@@ -562,7 +614,7 @@ function initBalTable(){
         formatter: v => {
           if(v == null) return '';
           const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneyWhole(v)}</span>`;   // nearest dollar, no cents
+          return `<span class="fw-bold ${c}">${moneySigned(v)}</span>`;   // nearest dollar, no cents
         } }
     ],
     sortName: 'amount', sortOrder: 'desc',
@@ -572,15 +624,9 @@ function initBalTable(){
   });
 }
 
-// Rank medal for the balances table: 🥇 #1, 🥈 #2, 💩 last. people is sorted by
-// balance desc, so the row index is the rank. (Same count thresholds as the graph
-// emojis so tiny groups don't get nonsensical medals.)
-function tableMedal(rank, count){
-  if(count >= 2 && rank === 0) return '🥇';
-  if(count >= 3 && rank === 1) return '🥈';
-  if(count >= 2 && rank === count - 1) return '💩';
-  return '';
-}
+// Rank medal for the balances table: 🥇 #1, 🥈 #2, 💩 last (poker-only, via the
+// shared rankEmoji gate). people is sorted by balance desc, so the row index = rank.
+const tableMedal = (rank, count) => rankEmoji(rank, count, '🥇');
 
 // Medals earned per person in one dated column (name -> medal char). Mirrors how
 // showDataset builds `people`: present people only, sorted by balance desc.
@@ -631,14 +677,18 @@ function renderTable(){
   const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
   const n = people.length;
   // All Time accumulates medals from every dated column + shows an Average column
-  // (balance ÷ times seen); other columns (not IOU) get their own 🥇/🥈/💩.
+  // (balance ÷ times seen); other columns (not IOU) get their own 🥇/🥈/💩. Medals,
+  // crown and the Average column are poker-mode features (the rankEmoji gate already
+  // empties medals when off) — off means a plain ledger sorted by balance (so All
+  // Time behaves like any dated column).
   const isAllTime = label === 'All Time';
+  const showAverage = isAllTime && pokerMode;
   const acc = isAllTime ? accumulatedMedals() : null;
 
   // Averages (computed once) + the top average gets a 👑 (suffixed first). All Time
   // is sorted by average desc, so its # rank follows average order too.
   let avg = null, crowned = new Set(), rankByName = null;
-  if(isAllTime){
+  if(showAverage){
     avg = new Map(people.map(p => { const s = seenCount(p.idx); return [p.name, s ? p.balance / s : 0]; }));
     if(people.length >= 2){
       const max = Math.max(...avg.values());
@@ -652,16 +702,16 @@ function renderTable(){
     let medal = '';
     if(isAllTime){
       medal = acc.get(p.name) || '';
-      if(crowned.has(p.name)) medal = '👑' + medal;   // crown first in the suffix
+      if(crowned.has(p.name)) medal = '👑' + medal;   // crowned is empty unless poker
     }else if(label !== 'IOUs') medal = tableMedal(i, n);
-    const row = { rank: isAllTime ? rankByName.get(p.name) : i + 1,
+    const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
-    if(isAllTime) row.average = avg.get(p.name);
+    if(showAverage) row.average = avg.get(p.name);
     return row;
   });
   $('#balTable').bootstrapTable('load', rows);
-  $('#balTable').bootstrapTable(isAllTime ? 'showColumn' : 'hideColumn', 'average');
-  $('#balTable').bootstrapTable('sortBy', isAllTime
+  $('#balTable').bootstrapTable(showAverage ? 'showColumn' : 'hideColumn', 'average');
+  $('#balTable').bootstrapTable('sortBy', showAverage
     ? { field: 'average', sortOrder: 'desc' } : { field: 'amount', sortOrder: 'desc' });
   document.getElementById('tableCard').classList.remove('d-none');
 }
@@ -1077,6 +1127,12 @@ function main(){
   document.getElementById('netToggle').addEventListener('change', e => {
     txnNet = e.target.checked;
     if(graphMode === 'txn') renderTxnGraph();
+  });
+  // poker-mode switch: flip poker mode and stick the choice (so a later sheet-title
+  // refresh won't override the user's explicit pick)
+  document.getElementById('pokerToggle').addEventListener('change', e => {
+    pokerUserSet = true;
+    setPokerMode(e.target.checked);
   });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
