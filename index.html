@@ -8,6 +8,10 @@
 <!-- All dependencies inline from CDN with pinned versions (see CLAUDE.md) -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.css" rel="stylesheet">
+<!-- Ewert: western/casino display face for the poker-chip text (poker mode only) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Ewert&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap-table@1.27.3/dist/bootstrap-table.min.js"></script>
@@ -39,7 +43,7 @@
      own height (height:auto, scaled to fit width), so no hardcoded min-height.
      Cap the width so chips don't balloon on a wide desktop (centered via margin);
      on mobile it stays under the cap, so it just fits the width — no h-scroll. */
-  #graph svg{max-width:min(100%,40rem);height:auto;display:block;margin:0 auto}
+  #graph svg{max-width:min(100%,54rem);height:auto;display:block;margin:0 auto}
   #graph g.node,#graph g.edge{transition:opacity .15s}
   #graph.selecting g.node,#graph.selecting g.edge{opacity:.12}
   #graph.selecting g.node.keep,#graph.selecting g.edge.keep{opacity:1}
@@ -484,6 +488,7 @@ let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
 let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
+let ewertChecked = false;    // one-shot: re-render poker chips once the Ewert font loads
 let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual IOU/All Time)
@@ -517,27 +522,55 @@ function buildDot(transfers){
   // 'txn' mode: nodes are the ledger participants; labels are name-only (no emoji /
   // balance line), edges are the aggregated (from,to) sums.
   const shown = graphNodes;
-  const NAME_PT = 14;
+  const NAME_PT = 22, AMT_PT = 13;
+  // Poker chips use the Ewert western/casino display face (poker mode only); it's a
+  // wide, all-caps display face, so it needs a fatter per-glyph estimate AND more of
+  // the circle kept clear. Emojis carry no Ewert glyphs → system emoji font fallback.
+  const nodeFont = pokerMode ? `Ewert,${fontname}` : fontname;
+  const glyphW = pokerMode ? 0.92 : 0.6;        // avg glyph width as a fraction of em
+  // Uniform diameter (inches): the longest name AND the full label height must fit
+  // inside the clear inner face — i.e. within FIT × diameter across. Poker keeps a
+  // smaller FIT so the name never reaches the rim/groove band; plain mode can use
+  // more of the circle. Take the max of the width- and height-driven needs.
+  const FIT = pokerMode ? 0.50 : 0.72;          // fraction of the diameter the label may span
+                                                // (poker keeps the name inside the 0.6r face ring)
   const maxChars = Math.max(3, ...shown.map(p => p.name.length));
-  const diameter = Math.max(1.3, (maxChars * NAME_PT * 0.6 / 72) / 0.78 + 0.6).toFixed(2);
+  const nameW = maxChars * NAME_PT * glyphW / 72;                          // widest name (in)
+  const rows = graphMode === 'balances' ? [NAME_PT, NAME_PT, AMT_PT] : [NAME_PT];  // emoji/name/$
+  const labelH = rows.reduce((s, pt) => s + pt, 0) * 1.3 / 72;             // label stack height (in)
+  const diameterNum = Math.max(2.0, nameW / FIT, labelH / FIT);
+  const diameter = diameterNum.toFixed(2);
+  // Edge label font / stroke / arrow scale WITH the chip size (the graph scales to fit
+  // width, so a fixed 12pt looked tiny next to big chips). Tuned to roughly match the
+  // chip's $ amount text.
+  const edgeFs  = Math.round(diameterNum * 8);
+  const edgePen = (diameterNum * 0.45).toFixed(2);
+  const arrowSc = (diameterNum * 0.5).toFixed(2);
   let dot = 'digraph G {\n';
   dot += `  bgcolor="transparent"; rankdir=${rankdir}; pad=0.2; nodesep=0.5; ranksep=0.8;\n`;
-  dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${fontname}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
-  dot += `  edge [fontname="${fontname}", fontsize=12, color="#8a93a5", fontcolor="#cfd6e4", penwidth=1.6, arrowsize=0.8];\n`;
+  dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${nodeFont}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
+  dot += `  edge [fontname="${fontname}", fontsize=${edgeFs}, color="#8a93a5", fontcolor="#cfd6e4", penwidth=${edgePen}, arrowsize=${arrowSc}];\n`;
   for(const p of shown){
     let lbl;
-    if(graphMode === 'balances'){
+    if(pokerMode){
+      // Poker chips (both the settlement AND the transactions graph): Graphviz lays out
+      // HTML labels with its own font metrics, which don't match the Ewert web font →
+      // off-center text & a mis-sized $ pill. So we emit NO label here and draw the
+      // emoji/name/$ ourselves, perfectly centered, in decoratePokerChips (drawChipText).
+      // The empty label still reserves the circle.
+      lbl = '""';
+    }else if(graphMode === 'balances'){
       // HTML-like table label: emoji / name rows in the node's on-fill color, then
       // the $amount green/red on a small rounded "groove"-colored (white/black)
       // backing pill — a nested 1-cell table so the pill hugs the text.
       const groove = textOn(p.color);                      // chip groove color (white/black)
-      const emojiRow = p.emoji ? `<TR><TD>${p.emoji}</TD></TR>` : '';
-      const amt = `<FONT POINT-SIZE="8" COLOR="${moneyColorOn(groove, p.balance)}"> ${escapeHtml(moneySigned(p.balance))} </FONT>`;
-      const pill = `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="${groove}" STYLE="ROUNDED"><TR><TD>${amt}</TD></TR></TABLE>`;
-      lbl = `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0">`
+      const emojiRow = p.emoji ? `<TR><TD ALIGN="CENTER">${p.emoji}</TD></TR>` : '';
+      const amt = `<FONT POINT-SIZE="13" COLOR="${moneyColorOn(groove, p.balance)}"> ${escapeHtml(moneySigned(p.balance))} </FONT>`;
+      const pill = `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="${groove}" STYLE="ROUNDED"><TR><TD ALIGN="CENTER">${amt}</TD></TR></TABLE>`;
+      lbl = `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0" ALIGN="CENTER">`
           + emojiRow
-          + `<TR><TD>${escapeHtml(p.name)}</TD></TR>`
-          + `<TR><TD>${pill}</TD></TR>`
+          + `<TR><TD ALIGN="CENTER">${escapeHtml(p.name)}</TD></TR>`
+          + `<TR><TD ALIGN="CENTER">${pill}</TD></TR>`
           + `</TABLE>>`;
     }else{
       lbl = `<${escapeHtml(p.name)}>`;                      // ledger graph: name only
@@ -574,13 +607,15 @@ function renderGraph(transfers){
     const svg = d3.select('#graph svg');
     svg.attr('width', '100%').attr('height', null);
     if(pokerMode) decoratePokerChips(svg);
-    // make rows able to highlight nodes (re-bind because SVG is regenerated)
-    d3.selectAll('#graph g.node').style('cursor', 'pointer').on('click', function(){
-      const id = this.getAttribute('id');
-      const p = graphNodes.find(x => x.nodeId === id);
-      if(p) selectPerson(p.nodeId);
-    });
+    // let chips be dragged around (and click-to-highlight when not dragged)
+    enableNodeDrag(svg);
     applyGraphSelection();
+    // chip text auto-fits via getComputedTextLength, so it must be measured with the
+    // real Ewert font: re-render once after the web font finishes loading (one-shot).
+    if(pokerMode && !ewertChecked && document.fonts && document.fonts.ready){
+      ewertChecked = true;
+      document.fonts.ready.then(() => { if(pokerMode && currentTransfers) renderGraph(currentTransfers); });
+    }
   });
 }
 
@@ -610,7 +645,151 @@ function decoratePokerChips(svg){
     circle(rRim, band, `${(seg * 0.5).toFixed(2)} ${(seg * 0.5).toFixed(2)}`);
     // thin inner ring marking the chip's center face
     circle(r * 0.6, Math.max(1.5, r * 0.025));
+
+    // Draw the label ourselves (the DOT label is empty in poker mode) so it's exactly
+    // centered and the $ pill fits — text-anchor=middle at the node center. Works for
+    // both the settlement graph and the transactions graph (which is name-only).
+    const person = graphNodes.find(p => p.nodeId === this.getAttribute('id'));
+    if(person) drawChipText(this, person, cx, cy, r, ell.getAttribute('fill') || '#888');
   });
+}
+
+// Centered emoji / name / $-pill for a poker chip, drawn in raw SVG (see above).
+const EWERT_STACK = "'Ewert', Helvetica, Arial, sans-serif";
+const CLEAN_STACK = "Helvetica, Arial, sans-serif";
+const EMOJI_STACK = "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif";
+function drawChipText(g, person, cx, cy, r, fill){
+  const groove = textOn(fill);
+  const mk = (txt, family, size, color, yc, weight) => {
+    const t = document.createElementNS(SVGNS, 'text');
+    t.setAttribute('class', 'chip-deco');
+    t.setAttribute('x', cx); t.setAttribute('y', yc);
+    t.setAttribute('text-anchor', 'middle'); t.setAttribute('dominant-baseline', 'central');
+    t.setAttribute('font-family', family); t.setAttribute('font-size', size); t.setAttribute('fill', color);
+    if(weight) t.setAttribute('font-weight', weight);
+    t.textContent = txt;
+    g.appendChild(t);
+    return t;
+  };
+  // name — auto-fit to ~1.1r wide (inside the 0.6r face ring), capped in height
+  const name = mk(person.name, EWERT_STACK, r * 0.30, groove, cy);
+  const w = name.getComputedTextLength() || 1;
+  name.setAttribute('font-size', Math.min(r * 0.30 * (r * 1.10) / w, r * 0.40));
+  // emoji row above, $ pill below — only when present (the txn graph is name-only)
+  if(person.emoji) mk(person.emoji, EMOJI_STACK, r * 0.20, groove, cy - r * 0.34);
+  if(Number.isFinite(person.balance)){
+    const amt = mk(moneySigned(person.balance), CLEAN_STACK, r * 0.15,
+                   moneyColorOn(groove, person.balance), cy + r * 0.34, 'bold');
+    const bb = amt.getBBox();                     // size the pill to the actual number
+    const px = r * 0.08, py = r * 0.02;
+    const rect = document.createElementNS(SVGNS, 'rect');
+    rect.setAttribute('class', 'chip-deco');
+    rect.setAttribute('x', bb.x - px); rect.setAttribute('y', bb.y - py);
+    rect.setAttribute('width', bb.width + 2 * px); rect.setAttribute('height', bb.height + 2 * py);
+    rect.setAttribute('rx', (bb.height + 2 * py) / 2);
+    rect.setAttribute('fill', groove);
+    g.insertBefore(rect, amt);                    // pill behind the number
+  }
+}
+
+// Make each chip draggable. Graphviz emits a static SVG, so we move the node's <g>
+// with a translate and re-draw the edges it touches as straight arrows (path +
+// arrowhead polygon + label). Offsets live only in this SVG — a re-render (dataset/
+// poker toggle) lays everything back out from scratch. A press without movement is
+// treated as a click → selectPerson (keeps click-to-highlight working).
+function enableNodeDrag(svg){
+  const gGraph = svg.select('g.graph');
+  if(gGraph.empty()) return;
+  const root = gGraph.node();
+  const nameOf = g => { const t = g.querySelector('title'); return t ? t.textContent : null; };
+
+  // index nodes by their graphviz name, with a live drag offset (ox,oy)
+  const nodes = new Map();
+  svg.selectAll('g.node').each(function(){
+    const ell = this.querySelector('ellipse'); if(!ell) return;
+    nodes.set(nameOf(this), { g:this, cx:+ell.getAttribute('cx'), cy:+ell.getAttribute('cy'),
+                              r:+ell.getAttribute('rx'), ox:0, oy:0 });
+  });
+  const center = nm => { const n = nodes.get(nm); return n ? {x:n.cx+n.ox, y:n.cy+n.oy, r:n.r} : null; };
+
+  // Give the chips room to be rearranged: pad the viewBox by ~1.5 radii on every
+  // side (the drawing just scales down a touch to fit), then clamp drags so a whole
+  // chip can never leave that padded box. All node coords + drag offsets + the
+  // pointer (via d3.pointer on g.graph) live in g.graph's local space, so we map the
+  // padded viewBox rect back into that space and clamp each center to [min+r,max-r].
+  const maxR = Math.max(1, ...[...nodes.values()].map(n => n.r));
+  const vb = (svg.attr('viewBox') || '').split(/[\s,]+/).map(Number);
+  let bounds = null;
+  if(vb.length === 4 && vb.every(v => !isNaN(v))){
+    const m = maxR * 0.5;
+    const ev = [vb[0]-m, vb[1]-m, vb[2]+2*m, vb[3]+2*m];
+    svg.attr('viewBox', ev.join(' '));
+    const ctm = root.getCTM();                       // g.graph local -> viewBox space
+    if(ctm){
+      const inv = ctm.inverse();
+      const corners = [[ev[0],ev[1]],[ev[0]+ev[2],ev[1]],[ev[0],ev[1]+ev[3]],[ev[0]+ev[2],ev[1]+ev[3]]]
+        .map(([x,y]) => new DOMPoint(x,y).matrixTransform(inv));
+      bounds = { minX:Math.min(...corners.map(p=>p.x)), maxX:Math.max(...corners.map(p=>p.x)),
+                 minY:Math.min(...corners.map(p=>p.y)), maxY:Math.max(...corners.map(p=>p.y)) };
+    }
+  }
+  const clampOffset = n => {
+    if(!bounds) return;
+    const pad = n.r + 4;                             // keep the full circle (incl. stroke) inside
+    const cx = Math.min(Math.max(n.cx+n.ox, bounds.minX+pad), bounds.maxX-pad);
+    const cy = Math.min(Math.max(n.cy+n.oy, bounds.minY+pad), bounds.maxY-pad);
+    n.ox = cx - n.cx; n.oy = cy - n.cy;
+  };
+
+  // index edges + adjacency (edge title is "from->to")
+  const edges = [], adj = new Map();
+  const pushAdj = (k,e) => { (adj.get(k) || adj.set(k,[]).get(k)).push(e); };
+  svg.selectAll('g.edge').each(function(){
+    const t = nameOf(this); if(!t) return;
+    const i = t.indexOf('->'); if(i < 0) return;
+    const e = { from:t.slice(0,i), to:t.slice(i+2), path:this.querySelector('path'),
+                arrow:this.querySelector('polygon'), labels:Array.from(this.querySelectorAll('text')) };
+    if(!e.path) return;                         // skip invisible ($0-anchor) edges
+    edges.push(e); pushAdj(e.from, e); pushAdj(e.to, e);
+  });
+
+  const updateEdge = e => {
+    const s = center(e.from), t = center(e.to); if(!s || !t) return;
+    let dx = t.x-s.x, dy = t.y-s.y; const len = Math.hypot(dx,dy) || 1;
+    const ux = dx/len, uy = dy/len, px = -uy, py = ux;          // unit dir + perpendicular
+    const arrow = Math.max(10, t.r * 0.16);                     // arrowhead scales with chip size
+    const x1 = s.x+ux*s.r, y1 = s.y+uy*s.r;                     // start at source rim
+    const tipX = t.x-ux*t.r, tipY = t.y-uy*t.r;                 // arrow tip at target rim
+    const bX = tipX-ux*arrow, bY = tipY-uy*arrow;               // arrowhead base
+    e.path.setAttribute('d', `M${x1},${y1}L${bX},${bY}`);
+    if(e.arrow) e.arrow.setAttribute('points',
+      `${bX+px*arrow*0.5},${bY+py*arrow*0.5} ${bX-px*arrow*0.5},${bY-py*arrow*0.5} ${tipX},${tipY}`);
+    const mx = (x1+tipX)/2, my = (y1+tipY)/2;                   // label near the midpoint
+    e.labels.forEach(tn => { tn.setAttribute('x', mx); tn.setAttribute('y', my-3); });
+  };
+
+  const drag = d3.drag()
+    .on('start', function(event){
+      this.__nm = nameOf(this); const n = nodes.get(this.__nm);
+      this.__moved = false; this.__p0 = d3.pointer(event, root); this.__o0 = {ox:n.ox, oy:n.oy};
+      d3.select(this).raise().style('cursor', 'grabbing');
+    })
+    .on('drag', function(event){
+      const p = d3.pointer(event, root);
+      const dx = p[0]-this.__p0[0], dy = p[1]-this.__p0[1];
+      if(Math.abs(dx) > 2 || Math.abs(dy) > 2) this.__moved = true;
+      const n = nodes.get(this.__nm); n.ox = this.__o0.ox+dx; n.oy = this.__o0.oy+dy;
+      clampOffset(n);
+      this.setAttribute('transform', `translate(${n.ox},${n.oy})`);
+      (adj.get(this.__nm) || []).forEach(updateEdge);
+    })
+    .on('end', function(){
+      d3.select(this).style('cursor', 'grab');
+      if(this.__moved) return;
+      const p = graphNodes.find(x => x.nodeId === this.getAttribute('id'));
+      if(p) selectPerson(p.nodeId);
+    });
+  svg.selectAll('g.node').style('cursor', 'grab').call(drag);
 }
 
 function selectPerson(nodeId){
