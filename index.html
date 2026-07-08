@@ -105,6 +105,15 @@
           <table id="balTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-txn" role="tabpanel">
+          <div id="txnAdd" class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <select id="txnFrom" class="form-select w-auto flex-grow-1" aria-label="From"></select>
+            <select id="txnTo" class="form-select w-auto flex-grow-1" aria-label="To"></select>
+            <div class="input-group w-auto flex-grow-1">
+              <span class="input-group-text">$</span>
+              <input id="txnAmt" type="number" inputmode="decimal" min="0" step="any" class="form-control" placeholder="Amount" aria-label="Amount">
+            </div>
+            <button id="txnAddBtn" class="btn btn-primary" type="button" disabled>Add</button>
+          </div>
           <table id="txnTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-input" role="tabpanel">
@@ -118,7 +127,29 @@
               <label class="form-check-label" for="pokerToggle">🃏</label>
             </div>
           </div>
-          <div class="ratio" style="--bs-aspect-ratio:70%">
+          <div class="input-group mb-1">
+            <input id="webappInput" type="text" class="form-control" spellcheck="false"
+                   placeholder="Apps Script Web App URL — optional, lets the Transactions tab add rows to the sheet" />
+            <button id="webappSave" class="btn btn-outline-secondary" type="button">Save</button>
+            <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#webappHelp" aria-label="How to set up">?</button>
+          </div>
+          <div id="webappHelp" class="collapse">
+            <div class="card card-body my-2">
+              <p class="mb-2">The published sheet is read-only, so adding transactions needs a one-time write endpoint on your sheet:</p>
+              <ol class="mb-0">
+                <li>In the Google Sheet: <em>Extensions → Apps Script</em>, replace the code with:
+                  <pre class="bg-body-tertiary rounded p-2 my-2 mb-0"><code>function doPost(e){
+  const t = JSON.parse(e.postData.contents);
+  SpreadsheetApp.getActiveSpreadsheet().getSheets()[0]
+    .appendRow([t.from, t.to, t.date, t.amount]);
+  return ContentService.createTextOutput('ok');
+}</code></pre></li>
+                <li><em>Deploy → New deployment → Web app</em>, execute as <strong>Me</strong>, who has access: <strong>Anyone</strong>.</li>
+                <li>Copy the Web app URL into the box above and hit <em>Save</em>.</li>
+              </ol>
+            </div>
+          </div>
+          <div class="ratio mt-3" style="--bs-aspect-ratio:70%">
             <iframe id="srcFrame" class="rounded border-0 bg-white" title="Source sheet" loading="lazy"></iframe>
           </div>
         </div>
@@ -1034,6 +1065,91 @@ function initTxnTable(){
 function renderTxnTable(){
   document.getElementById('txnTab').classList.toggle('d-none', !transactions.length);
   $('#txnTable').bootstrapTable('load', transactions.map(t => ({ from: t.from, to: t.to, date: t.date, amount: t.amount })));
+  renderTxnAddForm();
+}
+
+/* ===================== ADD TRANSACTION ===================== */
+// The published sheet is read-only (the CSV endpoint can't write), so appending a
+// row goes through a tiny Apps Script web app bound to the sheet (deploy: execute
+// as me / anyone — see the how-to in the Input tab), whose URL is saved per-sheet.
+// The POST body is JSON sent as text/plain — a "simple" CORS request, so no
+// preflight (Apps Script web apps can't answer OPTIONS).
+const webappKey = db => 'iou_webapp:' + db;
+const currentDb = () => document.getElementById('dbInput').value.trim();
+const getWebapp = () => { try { return localStorage.getItem(webappKey(currentDb())) || ''; } catch(e){ return ''; } };
+
+const MON_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// From/To dropdowns list everyone in the sheet; keep the current pick across re-renders.
+function renderTxnAddForm(){
+  for(const id of ['txnFrom', 'txnTo']){
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    const ph = new Option(id === 'txnFrom' ? 'From…' : 'To…', '', true, true);
+    ph.disabled = true;
+    sel.replaceChildren(ph);
+    for(const p of rawPeople) sel.add(new Option(p.name, p.name));
+    if(cur && rawPeople.some(p => p.name === cur)) sel.value = cur;
+  }
+  updateTxnAddState();
+}
+
+function txnAddValues(){
+  return { from: document.getElementById('txnFrom').value,
+           to:   document.getElementById('txnTo').value,
+           amount: parseFloat(document.getElementById('txnAmt').value) };
+}
+// Add is enabled only for a complete entry: two different people and a positive amount.
+function updateTxnAddState(){
+  const { from, to, amount } = txnAddValues();
+  document.getElementById('txnAddBtn').disabled = !(from && to && from !== to && amount > 0);
+}
+
+async function addTransaction(){
+  const { from, to, amount } = txnAddValues();
+  const url = getWebapp();
+  if(!url){
+    setStatus('error', 'Adding transactions needs a one-time setup: paste an Apps Script Web App URL in the <em>Input</em> tab (the <strong>?</strong> button there has the 2-minute how-to).');
+    return;
+  }
+  const now = new Date();   // date in the ledger's D-Mon style (e.g. 8-Jul)
+  const t = { from, to, date: now.getDate() + '-' + MON_NAMES[now.getMonth()], amount: round2(amount) };
+  const btn = document.getElementById('txnAddBtn');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  try{
+    const r = await fetch(url, { method: 'POST', body: JSON.stringify(t) });
+    if(!r.ok) throw new Error('HTTP ' + r.status);
+    applyAddedTransaction(t);
+    document.getElementById('txnAmt').value = '';
+    setStatus('ok', `Added ${escapeHtml(t.from)} → ${escapeHtml(t.to)} ${moneyWhole(t.amount)} to the sheet.`);
+  }catch(e){
+    setStatus('error', 'Could not add the transaction (' + escapeHtml(e.message) + '). Check the Apps Script Web App URL in the <em>Input</em> tab.');
+  }
+  btn.textContent = 'Add';
+  updateTxnAddState();
+}
+
+// Optimistic local update — the published CSV lags sheet edits by minutes, so
+// reflect the new transfer immediately: the ledger, each side's outstanding IOU,
+// both tables and (if showing) the ledger graph; and append the row to the cached
+// CSV so a reload keeps showing it until Google republishes.
+function applyAddedTransaction(t){
+  transactions.push(t);
+  const adj = (name, d) => {
+    const p = rawPeople.find(p => p.name === name);
+    if(p && p.iou != null) p.iou = round2(p.iou + d);
+  };
+  adj(t.from, t.amount); adj(t.to, -t.amount);
+  try{
+    const key = 'iou_csv:' + toCsvUrl(currentDb());
+    const cached = localStorage.getItem(key);
+    if(cached) localStorage.setItem(key,
+      cached.replace(/\s+$/, '') + '\n' + Papa.unparse([[t.from, t.to, t.date, t.amount]]));
+  }catch(e){}
+  renderTxnTable();
+  renderTable();
+  if(graphMode === 'txn') renderTxnGraph();
 }
 
 // Reflect the current selection on the table rows.
@@ -1068,6 +1184,7 @@ async function load(db){
 
   // reflect the current source in the Input tab + make the title link to the sheet
   document.getElementById('dbInput').value = db;
+  document.getElementById('webappInput').value = getWebapp();   // per-sheet write endpoint
   document.getElementById('appTitle').href = db;
   document.getElementById('srcFrame').src = db;
 
@@ -1425,6 +1542,18 @@ function main(){
   document.getElementById('pokerToggle').addEventListener('change', e => {
     pokerUserSet = true;
     setPokerMode(e.target.checked);
+  });
+  // add-transaction form: keep Add's enabled state live, submit on click
+  document.getElementById('txnAddBtn').addEventListener('click', addTransaction);
+  for(const id of ['txnFrom', 'txnTo', 'txnAmt'])
+    document.getElementById(id).addEventListener('input', updateTxnAddState);
+  // per-sheet Apps Script write endpoint (empty = remove)
+  document.getElementById('webappSave').addEventListener('click', () => {
+    const v = document.getElementById('webappInput').value.trim();
+    try { v ? localStorage.setItem(webappKey(currentDb()), v)
+            : localStorage.removeItem(webappKey(currentDb())); } catch(e) {}
+    setStatus('ok', v ? 'Web App URL saved — add transactions from the <em>Transactions</em> tab.'
+                      : 'Web App URL cleared.');
   });
   document.getElementById('dbLoad').addEventListener('click', () => {
     const v = document.getElementById('dbInput').value.trim();
