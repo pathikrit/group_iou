@@ -121,19 +121,6 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
   `buildDot`/`applyGraphSelection` operate on `graphNodes` (the nodes currently
   drawn) so highlight/selection work in both modes.
-- **Add transaction** (`#txnAdd`, above the ledger table in the Transactions tab):
-  From/To `form-select` dropdowns (everyone in `rawPeople`, re-filled by
-  `renderTxnAddForm` keeping the current pick) + a `$` number input + **Add**
-  (enabled only when from ≠ to and amount > 0, `updateTxnAddState`). The published
-  CSV is read-only, so `addTransaction` POSTs `{from,to,date,amount}` (date in the
-  ledger's `D-Mon` style) as JSON/text-plain — a simple CORS request, no preflight —
-  to a **per-sheet Apps Script web app** the user deploys once (how-to lives in the
-  Input tab's `#webappHelp` collapse; URL saved via `#webappInput`/`#webappSave` in
-  `localStorage['iou_webapp:'+db]`, no URL → error banner pointing at the setup).
-  On success `applyAddedTransaction` updates **optimistically** (Google republishes
-  the CSV minutes later): pushes onto `transactions`, adjusts both sides'
-  `rawPeople[i].iou`, appends the row to the cached CSV (so a reload keeps it until
-  the republish catches up), and re-renders the tables + (if showing) the txn graph.
 - **Net toggle** (`#netToggle`, `txnNet`, shown only in the txn graph via
   `#netToggleWrap`): on (default) collapses each pair to a single edge in the
   surplus direction (`A→B` minus `B→A`); off keeps both directions (≤2 edges/pair).
