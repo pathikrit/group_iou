@@ -109,9 +109,9 @@
         </div>
         <div class="tab-pane fade" id="pane-input" role="tabpanel">
           <div class="d-flex align-items-center gap-3 mb-3">
-            <div class="input-group input-group-lg flex-grow-1">
-              <input id="dbInput" type="text" class="form-control" spellcheck="false" placeholder="Published Google Sheet URL …/pubhtml?gid=0&single=true" />
-              <button id="dbLoad" class="btn btn-primary" type="button">Load</button>
+            <div class="d-flex gap-2 flex-grow-1">
+              <a id="dbOpen" class="btn btn-lg btn-primary" href="#" target="_blank" rel="noopener">Open</a>
+              <button id="dbRefresh" class="btn btn-lg btn-outline-secondary" type="button">Refresh</button>
             </div>
             <div class="form-check form-switch m-0 flex-shrink-0 fs-4">
               <input class="form-check-input" type="checkbox" role="switch" id="pokerToggle" title="Poker mode">
@@ -516,6 +516,7 @@ let graphNodes = [];         // nodes currently drawn (people in 'balances' mode
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
 let fontChecked = false;     // one-shot: re-render chips once the web fonts finish loading
 let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
+let currentDb = '';          // sheet URL currently loaded (localStorage[STORE_KEY] or DEMO)
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual All Time)
 let selectedDataset = 0;
@@ -1066,8 +1067,9 @@ async function load(db){
   activeNode = null;
   document.getElementById('settleCard').classList.add('d-none');
 
-  // reflect the current source in the Input tab + make the title link to the sheet
-  document.getElementById('dbInput').value = db;
+  // point the Input tab's Open button + preview and the title link at the sheet
+  currentDb = db;
+  document.getElementById('dbOpen').href = db;
   document.getElementById('appTitle').href = db;
   document.getElementById('srcFrame').src = db;
 
@@ -1100,7 +1102,7 @@ async function load(db){
       ? ' You are opening this file directly (file://), which browsers block from fetching. ' +
         'Serve it over http — e.g. <code>python3 -m http.server</code> then open ' +
         '<code>http://localhost:8000/</code> — or use the deployed GitHub Pages URL.'
-      : ' Make sure the sheet is published to the web. Use the <em>Input</em> tab to fix the URL.';
+      : ' Make sure the sheet is published to the web, then hit <em>Refresh</em> in the <em>Input</em> tab.';
     setStatus('error', 'Could not load the sheet (' + escapeHtml(e.message) + ').' + fileHint);
     document.getElementById('tableCard').classList.remove('d-none');
     showTab('tab-input');
@@ -1426,12 +1428,11 @@ function main(){
     pokerUserSet = true;
     setPokerMode(e.target.checked);
   });
-  document.getElementById('dbLoad').addEventListener('click', () => {
-    const v = document.getElementById('dbInput').value.trim();
-    if(!v) return;
-    try { localStorage.setItem(STORE_KEY, v); } catch(e) {}
+  // re-run the load pipeline for the current sheet (stale-while-revalidate picks
+  // up any changes) and jump back to the Balances tab
+  document.getElementById('dbRefresh').addEventListener('click', () => {
     showTab('tab-bal');
-    load(v);
+    load(currentDb);
   });
   let saved = null;
   try { saved = localStorage.getItem(STORE_KEY); } catch(e) {}

@@ -45,8 +45,11 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
-- Sheet is the pubhtml URL, entered in the **Input** tab; remembered in
-  `localStorage[STORE_KEY]`. First run uses `DEMO`. **No URL params.**
+- Sheet is the pubhtml URL from `localStorage[STORE_KEY]` (else `DEMO`); there is
+  **no URL entry in the UI** (and **no URL params**) — the Input tab has an
+  **Open** button (`#dbOpen`, opens the sheet) and a **Refresh** button
+  (`#dbRefresh`, re-runs `load(currentDb)` + jumps to Balances). Switching sheets
+  = editing `STORE_KEY` by hand.
 - pubhtml → CSV via `toCsvUrl` (`/pub?...&output=csv`); Google sends
   `Access-Control-Allow-Origin: *` so we fetch directly (no proxy).
   - `file://` (null origin) is blocked by browsers → must serve over http(s); the
@@ -108,7 +111,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
   `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
   `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
-  (URL + iframe). **Transfers** card just shows the graph (no tabs) — no textual
+  (Open/Refresh + iframe). **Transfers** card just shows the graph (no tabs) — no textual
   transfer list, graph only. It's **never shown while the Input tab is active**: the
   `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal goes through
   `showGraphCard()` which no-ops when `#tab-input` is `.active` — so re-renders (e.g.
@@ -136,7 +139,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `seenCount` = #dated columns the person appears in); both toggled via
   bootstrap-table `showColumn`/`hideColumn`, and the **highest-average person gets a
   👑** prefixed to their medal suffix.
-- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Load in the
+- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Refresh in the
   **Input** tab): a win/loss framing, on by default when the **sheet
   title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`
   (mirrors `userPicked`), and `setPokerMode` syncs the switch + re-renders the table
