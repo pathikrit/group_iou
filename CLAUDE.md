@@ -35,8 +35,13 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 - Tabs use Bootstrap's tab plugin (`data-bs-toggle="tab"`); switch programmatically
   via `showTab(id)`. Dataset toggle (`#dsToggle`, `renderDatasetToggle`): All Time
   as a `rounded-pill` CTA button, then dated columns rightmost-first in a
-  Bootstrap `.btn-group`, overflow (> `MAX_DATED_PILLS`) in a **nested `.btn-group`
-  dropdown** ("More"); active state via `markActiveDataset`. Status banner = a
+  Bootstrap `.btn-group`. **Desktop (≥ md)**: a row; pills past `MAX_DATED_PILLS`
+  collapse into a **nested `.btn-group` dropdown** ("More", `d-none d-md-flex`).
+  **Mobile (< md)**: the container stacks (`flex-column flex-md-row`) — All Time
+  full-width, then ALL dated pills below in ONE horizontally scrollable line (the
+  overflow pills are `d-md-none` twins of the dropdown items; the scroll rule is
+  the `#dsToggle .btn-group` media query in the `<style>` block — Bootstrap has no
+  responsive overflow utility). Active state via `markActiveDataset`. Status banner = a
   Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
@@ -123,8 +128,9 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
   dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
   **All Time** instead shows each person's medals *accumulated* across all
-  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, a kind with >5
-  collapsed to e.g. `🥇×11`). All Time also adds — between Balance and Average — an
+  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
+  count-prefixed token like `3 🥇` — a single medal stays bare — wrapped in a
+  `text-nowrap` span so the count can never wrap away from its medal). All Time also adds — between Balance and Average — an
   **IOUs** column (`rawPeople[i].iou`, what's still outstanding after the ledger;
   shown whenever a ledger exists, any mode) and an **Average** column (balance ÷
   `seenCount` = #dated columns the person appears in); both toggled via

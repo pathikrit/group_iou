@@ -67,6 +67,11 @@
   @media (max-width:768px){
     #pane-txn .fixed-table-body{max-height:60vh}
   }
+  /* mobile dataset toggle: the dated pills sit below the full-width All Time button
+     as ONE horizontally scrollable line (no responsive overflow utility in Bootstrap) */
+  @media (max-width:767.98px){
+    #dsToggle .btn-group{overflow-x:auto}
+  }
 </style>
 </head>
 <body>
@@ -96,7 +101,7 @@
       </ul>
       <div class="tab-content">
         <div class="tab-pane fade show active" id="pane-bal" role="tabpanel">
-          <div id="dsToggle" class="d-flex flex-wrap align-items-center gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
+          <div id="dsToggle" class="d-flex flex-column flex-md-row flex-md-wrap align-items-md-center gap-2 mb-3 d-none" role="group" aria-label="Dataset"></div>
           <table id="balTable"></table>
         </div>
         <div class="tab-pane fade" id="pane-txn" role="tabpanel">
@@ -873,7 +878,7 @@ function initBalTable(){
       { field: 'rank', title: '#', align: 'center', valign: 'middle', sortable: true, class: 'text-secondary' },
       { field: 'name', title: 'Name', sortable: true,
         formatter: (v, row) =>
-          `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' <span style="white-space:nowrap">' + row.medal + '</span>' : ''}` },
+          `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' ' + row.medal : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
         sorter: (a, b) => a - b, formatter: signedCell },
       // IOUs = what's still outstanding after the settlement ledger; shown only for
@@ -906,15 +911,16 @@ function columnMedals(colIdx){
   return m;
 }
 
-// Render a bag of medal chars in 🥇→🥈→💩 order, collapsing any kind with >5 to
-// "🥇×11" so a long winning streak doesn't blow out the cell.
+// Render a bag of medal chars in 🥇→🥈→💩 order as count-prefixed tokens — "3 🥇"
+// (a single medal stays bare, no "1"). Each token is a nowrap span so a wrapping
+// Name cell can never split a count from the medal it belongs to.
 const MEDAL_ORDER = ['🥇', '🥈', '💩'];
 function medalString(arr){
   const counts = {};
   for(const m of arr) counts[m] = (counts[m] || 0) + 1;
   return MEDAL_ORDER.filter(k => counts[k])
-    .map(k => counts[k] > 5 ? `${k}×${counts[k]}` : k.repeat(counts[k]))
-    .join('');
+    .map(k => `<span class="text-nowrap">${counts[k] > 1 ? counts[k] + ' ' : ''}${k}</span>`)
+    .join(' ');
 }
 
 // All medals each person accumulated across the dated columns (every dataset with a
@@ -971,7 +977,7 @@ function renderTable(){
     let medal = '';
     if(isAllTime){
       medal = acc.get(p.name) || '';
-      if(crowned.has(p.name)) medal = '👑' + medal;   // crowned is empty unless poker
+      if(crowned.has(p.name)) medal = '👑' + (medal ? ' ' + medal : '');   // crowned is empty unless poker
     }else medal = tableMedal(i, n);
     const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
@@ -1324,20 +1330,24 @@ function renderDatasetToggle(){
     el.appendChild(b);
   });
 
-  // dated columns rightmost-first as a Bootstrap btn-group; overflow -> nested dropdown
+  // dated columns rightmost-first as a Bootstrap btn-group. On mobile (< md) the
+  // group sits below the full-width All Time pill as ONE horizontally scrollable
+  // line showing every date; on desktop pills past MAX_DATED_PILLS collapse into a
+  // nested "More" dropdown instead (so those pills are mobile-only, and the
+  // dropdown is desktop-only).
   const dated = datasets.map((d, i) => i).filter(i => datasets[i].col !== undefined).reverse();
   if(!dated.length) return;
   const overflow = dated.length > MAX_DATED_PILLS ? dated.slice(MAX_DATED_PILLS) : [];
-  const shown = overflow.length ? dated.slice(0, MAX_DATED_PILLS) : dated;
 
   const group = document.createElement('div');
   group.className = 'btn-group';
   group.setAttribute('role', 'group');
-  shown.forEach(i => {
+  dated.forEach((i, k) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.ds = i;
-    b.className = 'btn btn-outline-secondary';
+    b.className = 'btn btn-outline-secondary text-nowrap flex-shrink-0';
+    if(k >= MAX_DATED_PILLS) b.classList.add('d-md-none');
     b.textContent = datasets[i].label;
     b.addEventListener('click', pick(i));
     group.appendChild(b);
@@ -1345,7 +1355,7 @@ function renderDatasetToggle(){
 
   if(overflow.length){
     const sub = document.createElement('div');
-    sub.className = 'btn-group';
+    sub.className = 'btn-group d-none d-md-flex';
     sub.id = 'dsMore';
     sub.setAttribute('role', 'group');
     const tgl = document.createElement('button');
