@@ -512,7 +512,7 @@ let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw trans
 let fontChecked = false;     // one-shot: re-render chips once the web fonts finish loading
 let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
-let datasets = [];           // [{label, col?}] value columns (incl. virtual IOU/All Time)
+let datasets = [];           // [{label, col?}] value columns (incl. virtual All Time)
 let selectedDataset = 0;
 let userPicked = false;      // true once the user clicks a dataset pill (stops default override)
 let transactions = [];       // [{from, to, date, amount}] parsed settlement ledger (if any)
@@ -858,6 +858,13 @@ function clearSelection(){
   applyGraphSelection();
 }
 
+// Green/red signed whole-dollar cell (Balance / IOUs / Average columns).
+function signedCell(v){
+  if(v == null) return '';
+  const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
+  return `<span class="fw-bold ${c}">${moneySignedCell(v)}</span>`;
+}
+
 // Bootstrap Table: init once, then load rows per dataset.
 function initBalTable(){
   $('#balTable').bootstrapTable({
@@ -868,19 +875,14 @@ function initBalTable(){
         formatter: (v, row) =>
           `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' <span style="white-space:nowrap">' + row.medal + '</span>' : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
-        sorter: (a, b) => a - b,
-        formatter: v => {
-          const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneySignedCell(v)}</span>`;
-        } },
+        sorter: (a, b) => a - b, formatter: signedCell },
+      // IOUs = what's still outstanding after the settlement ledger; shown only for
+      // the All Time column when a ledger exists (see renderTable)
+      { field: 'iou', title: 'IOUs', align: 'right', valign: 'middle', sortable: true, visible: false,
+        sorter: (a, b) => a - b, formatter: signedCell },
       // Average = balance ÷ times seen; shown only for the All Time column (see renderTable)
       { field: 'average', title: 'Average', align: 'right', valign: 'middle', sortable: true, visible: false,
-        sorter: (a, b) => a - b,
-        formatter: v => {
-          if(v == null) return '';
-          const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
-          return `<span class="fw-bold ${c}">${moneySignedCell(v)}</span>`;   // nearest dollar, no cents
-        } }
+        sorter: (a, b) => a - b, formatter: signedCell }
     ],
     sortName: 'amount', sortOrder: 'desc',
     rowAttributes: row => ({ 'data-node': row.nodeId }),
@@ -916,7 +918,7 @@ function medalString(arr){
 }
 
 // All medals each person accumulated across the dated columns (every dataset with a
-// source col — i.e. not the virtual IOU/All Time).
+// source col — i.e. not the virtual All Time).
 function accumulatedMedals(){
   const acc = new Map();   // name -> [medal chars]
   datasets.forEach((d, ci) => {
@@ -941,13 +943,15 @@ function seenCount(rawIdx){
 function renderTable(){
   const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
   const n = people.length;
-  // All Time accumulates medals from every dated column + shows an Average column
-  // (balance ÷ times seen); other columns (not IOU) get their own 🥇/🥈/💩. Medals,
-  // crown and the Average column are poker-mode features (the rankEmoji gate already
-  // empties medals when off) — off means a plain ledger sorted by balance (so All
-  // Time behaves like any dated column).
+  // All Time accumulates medals from every dated column + shows an IOUs column
+  // (what's still outstanding after the ledger) and an Average column (balance ÷
+  // times seen); dated columns get their own 🥇/🥈/💩. Medals, crown and the
+  // Average column are poker-mode features (the rankEmoji gate already empties
+  // medals when off) — off means a plain ledger sorted by balance (so All Time
+  // behaves like any dated column).
   const isAllTime = label === 'All Time';
   const showAverage = isAllTime && pokerMode;
+  const showIou = isAllTime && transactions.length > 0;
   const acc = isAllTime ? accumulatedMedals() : null;
 
   // Averages (computed once) + the top average gets a 👑 (suffixed first). All Time
@@ -968,13 +972,15 @@ function renderTable(){
     if(isAllTime){
       medal = acc.get(p.name) || '';
       if(crowned.has(p.name)) medal = '👑' + medal;   // crowned is empty unless poker
-    }else if(label !== 'IOUs') medal = tableMedal(i, n);
+    }else medal = tableMedal(i, n);
     const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
+    if(showIou) row.iou = rawPeople[p.idx].iou;
     if(showAverage) row.average = avg.get(p.name);
     return row;
   });
   $('#balTable').bootstrapTable('load', rows);
+  $('#balTable').bootstrapTable(showIou ? 'showColumn' : 'hideColumn', 'iou');
   $('#balTable').bootstrapTable(showAverage ? 'showColumn' : 'hideColumn', 'average');
   $('#balTable').bootstrapTable('sortBy', showAverage
     ? { field: 'average', sortOrder: 'desc' } : { field: 'amount', sortOrder: 'desc' });
@@ -1158,10 +1164,11 @@ function applyCsv(text){
     txns.push({ from, to, date: (r[2] == null ? '' : String(r[2])).trim(), amount: round2(amount) });
   }
 
-  // When a ledger exists, prepend two virtual datasets — "All Time" (base owed,
-  // = sum of the dated columns) and "IOUs" (All Time after applying the
-  // ledger: payer +amount, payee -amount). Each person's value array gets the two
-  // computed values unshifted so the index-based showDataset() needs no changes.
+  // When a ledger exists, prepend one virtual dataset — "All Time" (base owed,
+  // = sum of the dated columns) — unshifted onto every value array so the
+  // index-based showDataset() needs no changes. Each person also gets an `iou`
+  // (All Time after applying the ledger: payer +amount, payee -amount = what's
+  // still outstanding), shown as the IOUs column of the All Time table.
   if(txns.length){
     // a name only in the ledger (not in any dated column) still gets a row
     for(const t of txns) for(const nm of [t.from, t.to]){
@@ -1173,8 +1180,8 @@ function applyCsv(text){
       if(current.has(t.from)) current.set(t.from, current.get(t.from) + t.amount);
       if(current.has(t.to))   current.set(t.to,   current.get(t.to)   - t.amount);
     }
-    for(const p of rp) p.values.unshift(round2(current.get(p.name)), round2(allTime.get(p.name)));
-    ds.unshift({ label: 'IOUs' }, { label: 'All Time' });
+    for(const p of rp){ p.values.unshift(round2(allTime.get(p.name))); p.iou = round2(current.get(p.name)); }
+    ds.unshift({ label: 'All Time' });
   }
 
   datasets = ds;
@@ -1305,7 +1312,7 @@ function renderDatasetToggle(){
 
   const pick = i => () => { userPicked = true; showDataset(i); };
 
-  // computed columns (IOU / All Time) first, as standalone CTA pills
+  // the computed All Time column first, as a standalone CTA pill
   datasets.forEach((d, i) => {
     if(d.col !== undefined) return;
     const b = document.createElement('button');

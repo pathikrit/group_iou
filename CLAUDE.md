@@ -33,8 +33,8 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   bootstrap-table; use d3 for everything else.
 - `d3@7.9.0`, `@hpcc-js/wasm@2.34.2`, `d3-graphviz@5.6.0` (DOT→SVG), `papaparse@5.5.4`.
 - Tabs use Bootstrap's tab plugin (`data-bs-toggle="tab"`); switch programmatically
-  via `showTab(id)`. Dataset toggle (`#dsToggle`, `renderDatasetToggle`): IOUs/All
-  Time as `btn-lg rounded-pill` CTA buttons, then dated columns rightmost-first in a
+  via `showTab(id)`. Dataset toggle (`#dsToggle`, `renderDatasetToggle`): All Time
+  as a `rounded-pill` CTA button, then dated columns rightmost-first in a
   Bootstrap `.btn-group`, overflow (> `MAX_DATED_PILLS`) in a **nested `.btn-group`
   dropdown** ("More"); active state via `markActiveDataset`. Status banner = a
   Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
@@ -62,20 +62,21 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
     column → hidden); `Total` row skipped. No labels (old format) → single
     `Balance` column, no toggle.
   - Ledger → `transactions` `[{from, to, date, amount}]`. **When a ledger exists**,
-    two **virtual datasets are prepended**: **`All Time`** = per-person sum of the
-    dated columns (base owed, ignoring settlements), and **`IOUs`** = All Time
-    after applying the ledger (each transfer: payer `+amount`, payee `−amount`) =
-    what's still outstanding. Both are unshifted onto every
+    one **virtual dataset is prepended**: **`All Time`** = per-person sum of the
+    dated columns (base owed, ignoring settlements), unshifted onto every
     `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged.
+    Each person also gets **`rawPeople[i].iou`** = All Time after applying the
+    ledger (each transfer: payer `+amount`, payee `−amount`) = what's still
+    outstanding — NOT a dataset; it's shown as the **IOUs table column** in the
+    All Time view (see UI specifics).
     **`All Time` is the default selected column** until the user clicks a pill
     (`userPicked` flag; then their choice persists across revalidation). A name
     only in the ledger (not in any dated column) still gets a row (`All Time` = 0).
-    Toggle order: `IOUs | All Time | <dates…>` (`IOUs`/`All Time` render as larger
-    CTA pills). No ledger → legacy behavior (no computed columns, no Transactions
-    tab).
+    Toggle order: `All Time | <dates…>` (`All Time` renders as a larger CTA pill).
+    No ledger → legacy behavior (no computed column, no Transactions tab).
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
-  else error + no graph. (Both base and ledger are net-zero, so `IOUs`/`All Time`
-  stay net-zero.)
+  else error + no graph. (Both base and ledger are net-zero, so `All Time` — and
+  the `iou` values — stay net-zero.)
 
 ## Algorithm (`computeTransfers`) — three constraints, applied strictly in order
 The code MUST follow these exactly; keep the matching comment in `computeTransfers`.
@@ -120,13 +121,15 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   surplus direction (`A→B` minus `B→A`); off keeps both directions (≤2 edges/pair).
   Edges are always positive `from→to`; a pair that evens out shows no edge.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
-  dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`); IOUs
-  gets none. **All Time** instead shows each person's medals *accumulated* across all
+  dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
+  **All Time** instead shows each person's medals *accumulated* across all
   dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, a kind with >5
-  collapsed to e.g. `🥇×11`). All Time also adds an **Average** column (balance ÷
-  `seenCount` = #dated columns the person appears in; shown via bootstrap-table
-  `showColumn`/`hideColumn`), and the **highest-average person gets a 👑** prefixed
-  to their medal suffix.
+  collapsed to e.g. `🥇×11`). All Time also adds — between Balance and Average — an
+  **IOUs** column (`rawPeople[i].iou`, what's still outstanding after the ledger;
+  shown whenever a ledger exists, any mode) and an **Average** column (balance ÷
+  `seenCount` = #dated columns the person appears in); both toggled via
+  bootstrap-table `showColumn`/`hideColumn`, and the **highest-average person gets a
+  👑** prefixed to their medal suffix.
 - **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Load in the
   **Input** tab): a win/loss framing, on by default when the **sheet
   title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`
