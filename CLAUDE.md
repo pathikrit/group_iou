@@ -42,7 +42,7 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   overflow pills are `d-md-none` twins of the dropdown items; the scroll rule is
   the `#dsToggle .btn-group` media query in the `<style>` block — Bootstrap has no
   responsive overflow utility). Active state via `markActiveDataset`. Status banner = a
-  Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
+  Bootstrap `.alert` (`setStatus`).
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
 - Sheet URL = a user-entered override saved in `localStorage['iou_db']` (`STORE_KEY`),
@@ -113,29 +113,30 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
   `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
   `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
-  (Open/Refresh + iframe). **Transfers** card just shows the graph (no tabs) — no textual
-  transfer list, graph only. It's **never shown while the Input tab is active**: the
-  `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal goes through
-  `showGraphCard()` which no-ops when `#tab-input` is `.active` — so re-renders (e.g.
-  toggling poker mode) can't pop it back open. The bal/txn tabs re-render & re-show.
-- **The Transfers graph follows the active tab** (`graphMode`, switched by
-  `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
-  graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on
-  **Transactions** it's the *raw ledger* graph (`renderTxnGraph`/`txnGraphData`) —
-  **no settlement algorithm**, just the ledger summed per directed `(from,to)` pair
-  (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
-  `buildDot`/`applyGraphSelection` operate on `graphNodes` (the nodes currently
-  drawn) so highlight/selection work in both modes.
-- **Net toggle** (`#netToggle`, `txnNet`, shown only in the txn graph via
-  `#netToggleWrap`): on (default) collapses each pair to a single edge in the
-  surplus direction (`A→B` minus `B→A`); off keeps both directions (≤2 edges/pair).
-  Edges are always positive `from→to`; a pair that evens out shows no edge.
+  (Open/Update + iframe). **Transfers** card (`#settleCard`) just shows the graph (no
+  tabs) — no textual transfer list, graph only. It's **never shown while the Input tab
+  is active**: the `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal
+  goes through `showGraphCard()` which no-ops when `#tab-input` is `.active` — so
+  re-renders (e.g. toggling poker mode) can't pop it back open. The bal/txn tabs
+  re-render & re-show.
+- **The Transfers graph is ALWAYS a settlement graph** (`computeTransfers`,
+  name+balance+emoji nodes) — only *which balances feed it* changes with the active
+  tab (`renderActiveGraph`, on `shown.bs.tab` for `#tab-bal`/`#tab-txn`). On
+  **Balances** it settles the *selected dataset column* (`renderBalGraph` → `people`);
+  on **Transactions** it settles the *outstanding IOUs* (`renderIouGraph` →
+  `rawPeople[i].iou`, what's still owed after the ledger — Bob evened out shows as a
+  `$0`/👻 node). Both go through `renderSettlementGraph(balances)` (sort, emoji-tag by
+  its own pot, draw). **Card placement** follows the tab too (`placeGraphCard`): home
+  slot below the table card on Balances, moved to the **top of the txn pane, above the
+  `#txnTable` list**, on Transactions. `buildDot`/`applyGraphSelection` operate on
+  `graphNodes` so highlight/selection work in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
   dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
   **All Time** instead shows each person's medals *accumulated* across all
   dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
-  count-prefixed token like `3 🥇` — a single medal stays bare — wrapped in a
-  `text-nowrap` span so the count can never wrap away from its medal). All Time also adds — between Balance and Average — an
+  medal-then-count token like `🥇×11` — a single medal stays bare, no `×1` — wrapped in a
+  `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
+  👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds — between Balance and Average — an
   **IOUs** column (`rawPeople[i].iou`, what's still outstanding after the ledger;
   shown whenever a ledger exists, any mode) and an **Average** column (balance ÷
   `seenCount` = #dated columns the person appears in); both toggled via

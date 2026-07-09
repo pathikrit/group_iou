@@ -128,13 +128,6 @@
 
   <div id="settleCard" class="card mb-3 d-none">
     <div class="card-body">
-      <div id="netToggleWrap" class="d-none justify-content-end mb-2">
-        <div class="form-check form-switch m-0">
-          <input class="form-check-input" type="checkbox" role="switch" id="netToggle" checked>
-          <label class="form-check-label" for="netToggle"
-                 title="Net: at most one edge per pair (A→B minus B→A)">Net</label>
-        </div>
-      </div>
       <div id="graph" class="overflow-hidden text-center"></div>
     </div>
   </div>
@@ -206,7 +199,7 @@ function setPokerMode(on){
     const pot = totalPot();
     people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
     renderTable();
-    if(graphMode === 'balances') renderBalGraph();
+    renderActiveGraph();   // re-render the active settlement graph (Balances or IOU) with the new emojis
   }
 }
 async function fetchSheetTitle(pubUrl){
@@ -516,10 +509,8 @@ function greedyTree(g){
 let people = [];          // [{name, balance, idx, color, nodeId}] for the selected column
 let activeNode = null;
 let currentTransfers = [];   // [{from, to, amount}] currently drawn
-let graphNodes = [];         // nodes currently drawn (people in 'balances' mode, ledger participants in 'txn' mode)
-let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
+let graphNodes = [];         // nodes currently drawn (the settlement graph's people)
 let fontChecked = false;     // one-shot: re-render chips once the web fonts finish loading
-let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual All Time)
 let selectedDataset = 0;
@@ -548,11 +539,9 @@ function buildDot(transfers){
   // one uniform diameter for every node, sized to fit the longest name (so all
   // circles match AND nothing clips). ~0.6em avg glyph; /0.78 to fit a line in a
   // circle; +padding.
-  // 'balances' mode: everyone present shows (incl. exact-$0 "evened out" 👻
-  // nodes); only MISSING people are absent. $0 nodes have no transfer edges, so an
-  // invisible edge anchors them to the bottom (see below).
-  // 'txn' mode: nodes are the ledger participants; labels are name-only (no emoji /
-  // balance line), edges are the aggregated (from,to) sums.
+  // Both modes are settlement graphs: everyone present shows (incl. exact-$0 "evened
+  // out" 👻 nodes); only MISSING people are absent. $0 nodes have no transfer edges,
+  // so an invisible edge anchors them to the bottom (see below).
   const shown = graphNodes;
   const NAME_PT = 22, AMT_PT = 13;
   // Poker chips use the Ewert western/casino display face (poker mode only); it's a
@@ -568,7 +557,7 @@ function buildDot(transfers){
                                                 // (poker keeps the name inside the 0.6r face ring)
   const maxChars = Math.max(3, ...shown.map(p => p.name.length));
   const nameW = maxChars * NAME_PT * glyphW / 72;                          // widest name (in)
-  const rows = graphMode === 'balances' ? [NAME_PT, NAME_PT, AMT_PT] : [NAME_PT];  // emoji/name/$
+  const rows = [NAME_PT, NAME_PT, AMT_PT];                                 // emoji/name/$
   const labelH = rows.reduce((s, pt) => s + pt, 0) * 1.3 / 72;             // label stack height (in)
   const diameterNum = Math.max(2.0, nameW / FIT, labelH / FIT);
   const diameter = diameterNum.toFixed(2);
@@ -583,9 +572,9 @@ function buildDot(transfers){
   dot += `  node [shape=circle, fixedsize=true, width=${diameter}, style="filled", fontname="${nodeFont}", fontsize=${NAME_PT}, penwidth=2, color="#0b0d11"];\n`;
   dot += `  edge [fontname="${fontname}", fontsize=${edgeFs}, color="#8a93a5", fontcolor="#cfd6e4", penwidth=${edgePen}, arrowsize=${arrowSc}];\n`;
   // Every node gets an EMPTY label — we draw the emoji/name/$ ourselves in SVG
-  // (drawChipLabels) for BOTH modes. Graphviz lays out HTML labels with its own font
-  // metrics, which don't match the web fonts (Inter/Ewert) → off-center text & a
-  // mis-sized/clipped $ pill. The empty label still reserves the fixed-size circle.
+  // (drawChipLabels). Graphviz lays out HTML labels with its own font metrics, which
+  // don't match the web fonts (Inter/Ewert) → off-center text & a mis-sized/clipped $
+  // pill. The empty label still reserves the fixed-size circle.
   for(const p of shown){
     dot += `  "${esc(p.name)}" [id="${p.nodeId}", label="", fillcolor="${p.color}", fontcolor="${textOn(p.color)}"];\n`;
   }
@@ -593,12 +582,10 @@ function buildDot(transfers){
     dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
   });
   // anchor settled ($0) nodes below the flow via an invisible edge from a creditor
-  if(graphMode === 'balances'){
-    const zeros = graphNodes.filter(p => Math.abs(p.balance) <= EPS);
-    const anchor = graphNodes.find(p => p.balance > EPS);
-    if(anchor) for(const z of zeros){
-      dot += `  "${esc(anchor.name)}" -> "${esc(z.name)}" [style=invis];\n`;
-    }
+  const zeros = graphNodes.filter(p => Math.abs(p.balance) <= EPS);
+  const anchor = graphNodes.find(p => p.balance > EPS);
+  if(anchor) for(const z of zeros){
+    dot += `  "${esc(anchor.name)}" -> "${esc(z.name)}" [style=invis];\n`;
   }
   dot += '}\n';
   return dot;
@@ -915,16 +902,17 @@ function columnMedals(colIdx){
   return m;
 }
 
-// Render a bag of medal chars in 🥇→🥈→💩 order as count-prefixed tokens — "3 🥇"
-// (a single medal stays bare, no "1"). Each token is a nowrap span so a wrapping
-// Name cell can never split a count from the medal it belongs to.
+// Render a bag of medal chars in 🥇→🥈→💩 order as tokens — "🥇×11" (a single medal
+// stays bare, no "×1"). Each token is a nowrap span so a wrapping Name cell can't
+// split a medal from its count; me-3 spaces the tokens apart (no separator char).
 const MEDAL_ORDER = ['🥇', '🥈', '💩'];
 function medalString(arr){
   const counts = {};
   for(const m of arr) counts[m] = (counts[m] || 0) + 1;
-  return MEDAL_ORDER.filter(k => counts[k])
-    .map(k => `<span class="text-nowrap">${counts[k] > 1 ? counts[k] + ' ' : ''}${k}</span>`)
-    .join(' ');
+  const kinds = MEDAL_ORDER.filter(k => counts[k]);
+  return kinds
+    .map((k, i) => `<span class="text-nowrap${i < kinds.length - 1 ? ' me-3' : ''}">${k}${counts[k] > 1 ? '×' + counts[k] : ''}</span>`)
+    .join('');
 }
 
 // All medals each person accumulated across the dated columns (every dataset with a
@@ -981,7 +969,8 @@ function renderTable(){
     let medal = '';
     if(isAllTime){
       medal = acc.get(p.name) || '';
-      if(crowned.has(p.name)) medal = '👑' + (medal ? ' ' + medal : '');   // crowned is empty unless poker
+      // crown prefix as its own me-3-spaced token (matches medalString spacing); crowned is empty unless poker
+      if(crowned.has(p.name)) medal = `<span class="text-nowrap${medal ? ' me-3' : ''}">👑</span>` + medal;
     }else medal = tableMedal(i, n);
     const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
@@ -1238,7 +1227,7 @@ function showDataset(idx){
   }
   setStatus('', '');
   showGraphCard();
-  renderBalGraph();
+  renderActiveGraph();
 }
 
 // Reveal the Transfers graph card — but NEVER while the Input tab is active (the
@@ -1249,7 +1238,43 @@ function showGraphCard(){
   document.getElementById('settleCard').classList.remove('d-none');
 }
 
-// Settlement graph for the selected balances column (Constraints 1-3).
+// Render whichever settlement graph matches the active tab, and put the graph card
+// in the right spot: below the table on Balances, above the ledger list on
+// Transactions. Called on tab switch, dataset change and poker toggle.
+function renderActiveGraph(){
+  const onTxn = document.getElementById('tab-txn').classList.contains('active');
+  placeGraphCard(onTxn);
+  if(onTxn) renderIouGraph(); else renderBalGraph();
+}
+
+// Move the (shared) Transfers graph card. On the Transactions tab it sits at the top
+// of the txn pane, above the ledger list; otherwise it lives in its home slot below
+// the table card. (No-op if already in place.)
+function placeGraphCard(intoTxn){
+  const card = document.getElementById('settleCard');
+  if(intoTxn){
+    const pane = document.getElementById('pane-txn');
+    if(card.parentElement !== pane) pane.insertBefore(card, pane.firstChild);
+  }else{
+    const home = document.getElementById('tableCard').parentElement;   // the container
+    if(card.parentElement !== home) home.appendChild(card);
+  }
+}
+
+// Settlement graph for a set of balances (Constraints 1-3): sort + tag emojis by
+// balance, then draw the minimal transfers. Shared by the Balances-column and
+// outstanding-IOU graphs.
+function renderSettlementGraph(balances){
+  activeNode = null;
+  balances.sort((a, b) => b.balance - a.balance);
+  const pot = balances.reduce((s, p) => s + (p.balance > 0 ? p.balance : 0), 0);
+  balances.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, balances.length); });
+  graphNodes = balances;
+  showGraphCard();
+  renderGraph(computeTransfers(balances).transfers);
+}
+
+// Settlement graph for the selected balances column.
 function renderBalGraph(){
   if(!people.length) return;
   // mirror showDataset's guard: a non-net-zero column has no settlement graph
@@ -1257,61 +1282,20 @@ function renderBalGraph(){
     document.getElementById('settleCard').classList.add('d-none');
     return;
   }
-  activeNode = null;
-  graphMode = 'balances';
-  graphNodes = people;
-  document.getElementById('netToggleWrap').classList.replace('d-flex', 'd-none');
-  showGraphCard();
-  renderGraph(computeTransfers(people).transfers);
+  renderSettlementGraph(people.slice());
 }
 
-// Raw transfer-ledger graph: no settlement algorithm. Sum the ledger per directed
-// (from, to) pair. net=false keeps both directions (<=2 edges per pair); net=true
-// collapses each pair to a single edge in the surplus direction (A->B minus B->A),
-// always positive from->to. $0 edges omitted. (A dense all-pairs graph is fine.)
-function txnGraphData(net){
-  const names = [...new Set(transactions.flatMap(t => [t.from, t.to]))];
-  const nodes = names.map(name => ({
-    name, color: colorForName(name), emoji: '',
-    nodeId: 'node-' + rawPeople.findIndex(p => p.name === name)
-  }));
-  const dir = new Map();                        // from + NUL + to -> {from, to, amount}
-  for(const t of transactions){
-    const k = t.from + '\u0000' + t.to;       // NUL can't appear in a name
-    const e = dir.get(k) || { from: t.from, to: t.to, amount: 0 };
-    e.amount += t.amount;
-    dir.set(k, e);
-  }
-  let edges;
-  if(net){
-    edges = [];
-    const done = new Set();
-    for(const [k, e] of dir){
-      if(done.has(k)) continue;
-      const revK = e.to + '\u0000' + e.from;
-      done.add(k); done.add(revK);
-      const rev = dir.get(revK);
-      const amt = e.amount - (rev ? rev.amount : 0);
-      if(Math.abs(amt) <= EPS) continue;        // evened out -> no edge
-      edges.push(amt > 0 ? { from: e.from, to: e.to, amount: amt }
-                         : { from: e.to, to: e.from, amount: -amt });
-    }
-  }else{
-    edges = [...dir.values()].filter(e => Math.abs(e.amount) > EPS).map(e => ({ ...e }));
-  }
-  edges.sort((a, b) => b.amount - a.amount);
-  return { nodes, edges };
-}
-
-function renderTxnGraph(){
+// Settlement graph of the outstanding IOUs (rawPeople[i].iou = what's still owed
+// after the ledger). Same minimal who-pays-whom algorithm as the Balances graph, fed
+// the IOU values instead of a dated column. Shown on the Transactions tab.
+function renderIouGraph(){
   if(!transactions.length) return;
-  activeNode = null;
-  graphMode = 'txn';
-  document.getElementById('netToggleWrap').classList.replace('d-none', 'd-flex');
-  const { nodes, edges } = txnGraphData(txnNet);
-  graphNodes = nodes;
-  showGraphCard();
-  renderGraph(edges);
+  const iouPeople = [];
+  rawPeople.forEach((rp, i) => {
+    if(rp.iou == null) return;
+    iouPeople.push({ name: rp.name, balance: rp.iou, idx: i, color: colorFor(i), nodeId: 'node-' + i, emoji: '' });
+  });
+  renderSettlementGraph(iouPeople);
 }
 
 const MAX_DATED_PILLS = 5;   // dated pills before the rest collapse into "More …"
@@ -1412,19 +1396,15 @@ function main(){
   document.getElementById('graph').addEventListener('click', e => {
     if(!e.target.closest('g.node')) clearSelection();
   });
-  // the Transfers graph follows the active tab: Balances -> settlement graph,
-  // Transactions -> raw transfer-ledger graph
-  document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderBalGraph);
-  document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderTxnGraph);
+  // the Transfers graph follows the active tab: Balances -> selected-column
+  // settlement graph (below the table); Transactions -> outstanding-IOU settlement
+  // graph (above the ledger list). renderActiveGraph handles both + card placement.
+  document.getElementById('tab-bal').addEventListener('shown.bs.tab', renderActiveGraph);
+  document.getElementById('tab-txn').addEventListener('shown.bs.tab', renderActiveGraph);
   // the Transfers graph is irrelevant on the Input tab — hide it there (the bal/txn
   // tabs re-render and re-show it when you switch back)
   document.getElementById('tab-input').addEventListener('shown.bs.tab',
     () => document.getElementById('settleCard').classList.add('d-none'));
-  // Net toggle re-renders the (transactions) graph: net vs both-directions
-  document.getElementById('netToggle').addEventListener('change', e => {
-    txnNet = e.target.checked;
-    if(graphMode === 'txn') renderTxnGraph();
-  });
   // poker-mode switch: flip poker mode and stick the choice (so a later sheet-title
   // refresh won't override the user's explicit pick)
   document.getElementById('pokerToggle').addEventListener('change', e => {
