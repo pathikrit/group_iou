@@ -20,6 +20,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm@2.34.2/dist/graphviz.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-graphviz@5.6.0/build/d3-graphviz.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.5.4/papaparse.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/nouislider@15.8.1/dist/nouislider.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/nouislider@15.8.1/dist/nouislider.min.js"></script>
 
 <style>
   /* The only non-Bootstrap CSS: a darker dark palette (via Bootstrap's own CSS
@@ -64,8 +66,40 @@
   #graph g.edge.keep path{stroke-width:3px !important}
   #graph g.edge.keep text{font-weight:700}
 
+  /* Odds tab (poker mode): the 13x13 starting-hand grid, its ranked list, and the
+     noUiSlider skin — custom like the Graphviz internals (no Bootstrap equivalent;
+     cell/table font sizes must scale with the grid). Cell colors are hsl() set in JS. */
+  /* Odds pane always uses the legible financial font (Inter), even in poker mode —
+     the casino display face is too hard to read for a dense grid of numbers. */
+  #pane-odds{font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+  #oddsLayout{position:relative}
+  #oddsRanksWrap{position:absolute;top:0;bottom:0;left:0;width:180px;overflow-y:auto}
+  #oddsRanks{font-size:.7em}
+  #oddsRanks thead th{position:sticky;top:0;z-index:1;background:var(--bs-card-bg,#171a21)}
+  #oddsRanks td{color:#fff;border:0;padding:.15rem .6rem}
+  #oddsGrid{display:grid;grid-template-columns:auto repeat(13,1fr);gap:2px;
+            margin-left:calc(180px + .75rem)}
+  #oddsGrid .lbl{display:flex;align-items:center;justify-content:center;font-weight:700;
+                 opacity:.55;padding:0 .3em;font-size:clamp(6px,1.1vw,12px)}
+  #oddsGrid .cell{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;
+                  justify-content:center;border-radius:4px;line-height:1.15;color:#fff;
+                  font-size:clamp(6px,1.1vw,12px);font-variant-numeric:tabular-nums}
+  #oddsGrid .cell .h{font-weight:700}
+  #oddsGrid .cell .p{opacity:.8;font-size:.85em}
+  #playersSlider{height:8px;border:0;box-shadow:none;background:var(--bs-secondary-bg)}
+  #playersSlider .noUi-connect{background:var(--bs-primary)}
+  #playersSlider .noUi-handle{width:20px;height:20px;right:-10px;top:-7px;border-radius:50%;
+                              border:0;box-shadow:none;background:var(--bs-primary);cursor:pointer}
+  #playersSlider .noUi-handle::before,#playersSlider .noUi-handle::after{display:none}
+  #playersSlider .noUi-tooltip{background:transparent;border:0;color:var(--bs-body-color);
+                               font-weight:700;font-size:.8em;padding:0;bottom:110%}
+
   @media (max-width:768px){
     #pane-txn .fixed-table-body{max-height:60vh}
+    /* Odds: no room for the side panel — stack the ranked list under the grid */
+    #oddsLayout{display:flex;flex-direction:column}
+    #oddsRanksWrap{position:static;order:2;width:auto;max-height:50vh;margin-top:1rem}
+    #oddsGrid{margin-left:0}
   }
 </style>
 </head>
@@ -90,6 +124,9 @@
         <li class="nav-item d-none" id="txnTab" role="presentation">
           <button class="nav-link" id="tab-txn" data-bs-toggle="tab" data-bs-target="#pane-txn" type="button" role="tab">Transactions</button>
         </li>
+        <li class="nav-item d-none" id="oddsTab" role="presentation">
+          <button class="nav-link" id="tab-odds" data-bs-toggle="tab" data-bs-target="#pane-odds" type="button" role="tab">Odds</button>
+        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="tab-input" data-bs-toggle="tab" data-bs-target="#pane-input" type="button" role="tab">Input</button>
         </li>
@@ -101,6 +138,29 @@
         </div>
         <div class="tab-pane fade" id="pane-txn" role="tabpanel">
           <table id="txnTable"></table>
+        </div>
+        <div class="tab-pane fade" id="pane-odds" role="tabpanel">
+          <div class="d-flex align-items-center gap-3 flex-wrap mb-3 pt-3">
+            <span class="text-nowrap"># players:</span>
+            <div id="playersSlider" class="flex-grow-1" style="min-width:150px"></div>
+            <div class="btn-group" role="group" aria-label="Color scale">
+              <input type="radio" class="btn-check" name="oddsMode" id="oddsModeRel" value="relative" checked>
+              <label class="btn btn-sm btn-outline-primary rounded-start-pill" for="oddsModeRel" data-bs-toggle="tooltip"
+                     data-bs-title="Shade by rank among all 169 hands: worst = red, median = yellow, best = green">Relative</label>
+              <input type="radio" class="btn-check" name="oddsMode" id="oddsModeBE" value="breakeven">
+              <label class="btn btn-sm btn-outline-primary rounded-end-pill" for="oddsModeBE" id="oddsBeLabel" data-bs-toggle="tooltip"
+                     data-bs-title="Shade vs the fair-share win rate of 1/players: above = green, at = yellow, below = red">Break-even</label>
+            </div>
+          </div>
+          <div id="oddsLayout">
+            <div id="oddsRanksWrap">
+              <table id="oddsRanks" class="table table-sm table-borderless mb-0">
+                <thead><tr><th>Rank</th><th>Hand</th><th>Win %</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div id="oddsGrid"></div>
+          </div>
         </div>
         <div class="tab-pane fade" id="pane-input" role="tabpanel">
           <div class="d-flex align-items-center gap-3 mb-3">
@@ -191,6 +251,10 @@ function setPokerMode(on){
   pokerMode = on;
   document.getElementById('pokerToggle').checked = on;
   document.body.classList.toggle('poker-ui', on);   // swaps the app font (Inter <-> Special Elite)
+  // the Odds tab exists only in poker mode; kick back to Balances if it was active
+  document.getElementById('oddsTab').classList.toggle('d-none', !on);
+  if(!on && document.getElementById('tab-odds').classList.contains('active')) showTab('tab-bal');
+  else applyPendingHash();   // an #odds deep-link can now be honored (tab just became visible)
   if(people.length){
     // node emojis are cached on each person (showDataset) — recompute so the rank
     // medals/crown appear/disappear with the mode
@@ -979,6 +1043,7 @@ function renderTable(){
   $('#balTable').bootstrapTable('sortBy', showAverage
     ? { field: 'average', sortOrder: 'desc' } : { field: 'amount', sortOrder: 'desc' });
   document.getElementById('tableCard').classList.remove('d-none');
+  applyPendingHash();   // tabs are now visible — honor a startup #tab deep-link
 }
 
 // Best-effort sort key for a ledger date string. Handles ISO / M-D-Y via native
@@ -1044,6 +1109,22 @@ function setStatus(kind, msg){
   el.classList.toggle('d-none', !msg);
 }
 const showTab = id => bootstrap.Tab.getOrCreateInstance(document.getElementById(id)).show();
+
+// Tab deep-links: the URL hash (#balances / #transactions / #odds / #input) selects a
+// tab, so you can link straight to one. `pendingHash` is applied as soon as the target
+// tab becomes available (tableCard shown, and — for Odds — poker mode on): applyPendingHash
+// is retried from renderTable and setPokerMode. Selecting a tab writes the hash back
+// (replaceState, so no history spam / no hashchange loop). NB: this is nav state, not a
+// data-source URL param — the sheet is still only set via the Input tab / localStorage.
+const TAB_BY_HASH = { balances:'tab-bal', transactions:'tab-txn', odds:'tab-odds', input:'tab-input' };
+const HASH_BY_TAB = { 'tab-bal':'balances', 'tab-txn':'transactions', 'tab-odds':'odds', 'tab-input':'input' };
+let pendingHash = (location.hash || '').replace(/^#/, '').toLowerCase();
+function applyPendingHash(){
+  if(!pendingHash) return;
+  const id = TAB_BY_HASH[pendingHash];
+  const btn = id && document.getElementById(id);
+  if(btn && !btn.closest('.d-none')){ pendingHash = ''; showTab(id); }   // only when tab is visible
+}
 
 /* ===================== MAIN ===================== */
 // Fetch + render a sheet. No URL params — the sheet comes from the UI / storage.
@@ -1383,6 +1464,106 @@ function markActiveDataset(idx){
   }
 }
 
+/* ── Odds tab (poker mode) ────────────────────────────────────────────────────
+   Pre-flop win % of the 169 canonical starting hands vs N-1 random opponents,
+   for 2-10 players. Data: calculator/odds.json ({ "AKs": [p2..p10], … } in
+   percent, generated once by calculator/poker.py — 1M Monte Carlo deals/cell),
+   fetched lazily the first time the tab is shown. Two color scales: 'relative'
+   (percentile rank among the 169 hands) and 'breakeven' (log-scaled vs the
+   1/players fair share, yellow at exactly break-even). */
+let odds = null, oddsMode = 'relative';
+const oddsCells = [], oddsRows = [], oddsDesc = {};
+const oddsColor = hue => `hsl(${hue}, 62%, 36%)`;
+
+function buildOddsDom(){
+  const order = 'AKQJT98765432';
+  const names = { A: 'Ace', K: 'King', Q: 'Queen', J: 'Jack', T: 'Ten' };
+  const name = r => names[r] || r;
+  const grid = document.getElementById('oddsGrid');
+  const lbl = t => {
+    const d = document.createElement('div');
+    d.className = 'lbl';
+    d.textContent = t;
+    grid.appendChild(d);
+  };
+  lbl('');                                        // header row + column to index in
+  for(const r of order) lbl(r);
+  for(let i = 0; i < 13; i++){
+    lbl(order[i]);
+    for(let j = 0; j < 13; j++){
+      // diagonal = pairs, upper-right = suited, lower-left = offsuit
+      const label = i === j ? order[i] + order[j]
+        : i < j ? order[i] + order[j] + 's'
+        : order[j] + order[i] + 'o';
+      const [hi, lo] = [order[Math.min(i, j)], order[Math.max(i, j)]];
+      oddsDesc[label] = i === j ? `Pair of ${name(hi)}s`
+        : `${name(hi)}-${name(lo)} ${i < j ? 'Suited' : 'Offsuit'}`;
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.dataset.bsToggle = 'tooltip';
+      div.dataset.bsTitle = oddsDesc[label];
+      const h = document.createElement('span'); h.className = 'h'; h.textContent = label;
+      const p = document.createElement('span'); p.className = 'p';
+      div.append(h, p);
+      grid.appendChild(div);
+      oddsCells.push({ label, div, p });
+    }
+  }
+  const tbody = document.querySelector('#oddsRanks tbody');
+  for(let k = 0; k < oddsCells.length; k++){
+    const tr = document.createElement('tr');
+    oddsRows.push([1, 2, 3].map(() => tr.appendChild(document.createElement('td'))));
+    tbody.appendChild(tr);
+  }
+  const slider = document.getElementById('playersSlider');
+  noUiSlider.create(slider, {                     // player count shown on the thumb
+    start: 6, step: 1, range: { min: 2, max: 10 }, connect: 'lower',
+    tooltips: { to: v => Math.round(v) },
+  });
+  slider.noUiSlider.on('update', renderOdds);
+  for(const el of document.querySelectorAll('input[name=oddsMode]'))
+    el.addEventListener('change', () => { oddsMode = el.value; renderOdds(); });
+  // one delegated Tooltip for the whole pane; animation/delay off => instant hovers
+  new bootstrap.Tooltip(document.getElementById('pane-odds'),
+    { selector: '[data-bs-toggle="tooltip"]', animation: false, delay: 0, container: 'body' });
+}
+
+async function showOdds(){
+  if(!odds){
+    odds = await (await fetch('calculator/odds.json')).json();
+    buildOddsDom();
+  }
+  renderOdds();
+}
+
+function renderOdds(){
+  const n = Math.round(+document.getElementById('playersSlider').noUiSlider.get());
+  const idx = n - 2, be = 100 / n;
+  const sorted = Object.values(odds).map(a => a[idx]).sort((a, b) => a - b);
+  document.getElementById('oddsBeLabel').textContent = `Break-even (${be.toFixed(1)}%)`;
+  const hueFor = eq => oddsMode === 'relative'
+    ? 120 * sorted.indexOf(eq) / (sorted.length - 1)  // red 0° .. green 120°
+    : 60 + 60 * Math.max(-1, Math.min(1, Math.log2(eq / be)));
+  for(const c of oddsCells){
+    const eq = odds[c.label][idx];
+    c.div.style.background = oddsColor(hueFor(eq));
+    c.p.textContent = eq.toFixed(1) + '%';
+  }
+  Object.entries(odds).map(([label, a]) => [label, a[idx]])
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([label, eq], k) => {
+      const [rank, hand, pct] = oddsRows[k];
+      rank.textContent = k + 1;
+      hand.textContent = label;
+      pct.textContent = eq.toFixed(1) + '%';
+      for(const td of oddsRows[k]){
+        td.style.background = oddsColor(hueFor(eq));
+        td.dataset.bsToggle = 'tooltip';
+        td.dataset.bsTitle = oddsDesc[label];
+      }
+    });
+}
+
 function main(){
   initBalTable();
   initTxnTable();
@@ -1398,6 +1579,22 @@ function main(){
   // tabs re-render and re-show it when you switch back)
   document.getElementById('tab-input').addEventListener('shown.bs.tab',
     () => document.getElementById('settleCard').classList.add('d-none'));
+  // the Odds tab likewise has no use for the graph; loads its data on first show
+  document.getElementById('tab-odds').addEventListener('shown.bs.tab', () => {
+    document.getElementById('settleCard').classList.add('d-none');
+    showOdds();
+  });
+  // tab deep-links: keep the URL hash in sync when a tab is shown, and follow the hash
+  // when it changes (e.g. someone opens a #odds link or edits the hash)
+  Object.keys(HASH_BY_TAB).forEach(id => {
+    const btn = document.getElementById(id);
+    if(btn) btn.addEventListener('shown.bs.tab',
+      () => history.replaceState(null, '', '#' + HASH_BY_TAB[id]));
+  });
+  window.addEventListener('hashchange', () => {
+    pendingHash = (location.hash || '').replace(/^#/, '').toLowerCase();
+    applyPendingHash();
+  });
   // Net toggle re-renders the (transactions) graph: net vs both-directions
   document.getElementById('netToggle').addEventListener('change', e => {
     txnNet = e.target.checked;

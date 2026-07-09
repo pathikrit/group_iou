@@ -16,8 +16,9 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
     Do not infer "they'll probably want this pushed." When unsure, the answer is no.
   - This is the #1 rule. A pattern of prior pushes never overrides it.
 - **Only these files may exist:** `index.html` (whole app — HTML+CSS+JS inline,
-  all deps from pinned CDNs), `.github/workflows/deploy.yml`, `CLAUDE.md`, `.git/`.
-  NO other files.
+  all deps from pinned CDNs), `calculator/` (exactly `poker.py`, `odds.json`,
+  `Makefile` — see "Odds tab"), `.github/workflows/deploy.yml`, `CLAUDE.md`,
+  `.git/`. NO other files.
 
 ## Deps (pinned CDNs in `index.html`)
 - `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
@@ -32,8 +33,17 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   order: jQuery → bootstrap bundle → bootstrap-table). jQuery is ONLY for
   bootstrap-table; use d3 for everything else.
 - `d3@7.9.0`, `@hpcc-js/wasm@2.34.2`, `d3-graphviz@5.6.0` (DOT→SVG), `papaparse@5.5.4`.
+- `nouislider@15.8.1` (CSS + JS) — ONLY for the Odds-tab player-count slider (value
+  shown on the thumb, which Bootstrap's `form-range` can't do).
 - Tabs use Bootstrap's tab plugin (`data-bs-toggle="tab"`); switch programmatically
-  via `showTab(id)`. Dataset toggle (`#dsToggle`, `renderDatasetToggle`): IOUs/All
+  via `showTab(id)`. **Tab deep-links:** the URL *hash* selects a tab
+  (`#balances`/`#transactions`/`#odds`/`#input`, `TAB_BY_HASH`/`HASH_BY_TAB`) so a tab
+  is directly linkable. Showing a tab writes the hash back (`history.replaceState` — no
+  history spam / no `hashchange` loop); `pendingHash` is applied via `applyPendingHash`
+  as soon as the target tab is *visible* (retried from `renderTable` once `tableCard`
+  shows, and from `setPokerMode` once the Odds tab appears). This is nav state only —
+  **not** a data-source param (the hash is separate from the "No URL params" rule below).
+  Dataset toggle (`#dsToggle`, `renderDatasetToggle`): IOUs/All
   Time as `btn-lg rounded-pill` CTA buttons, then dated columns rightmost-first in a
   Bootstrap `.btn-group`, overflow (> `MAX_DATED_PILLS`) in a **nested `.btn-group`
   dropdown** ("More"); active state via `markActiveDataset`. Status banner = a
@@ -41,7 +51,8 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
 - Sheet is the pubhtml URL, entered in the **Input** tab; remembered in
-  `localStorage[STORE_KEY]`. First run uses `DEMO`. **No URL params.**
+  `localStorage[STORE_KEY]`. First run uses `DEMO`. **No URL params** for the data
+  source (the URL *hash* is used only for tab deep-links — see Tabs above).
 - pubhtml → CSV via `toCsvUrl` (`/pub?...&output=csv`); Google sends
   `Access-Control-Allow-Origin: *` so we fetch directly (no proxy).
   - `file://` (null origin) is blocked by browsers → must serve over http(s); the
@@ -166,6 +177,27 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 - Heading = sheet name (`fetchSheetTitle`, best-effort, may be CORS-blocked →
   "Group IOU"); heading links to the sheet; GitHub icon top-right.
 
+- **Odds tab** (`#tab-odds`/`#pane-odds`, in the Balances-card tab bar; `d-none`
+  unless poker mode — gated in `setPokerMode`, which kicks back to Balances if the
+  tab was active when the mode turns off): pre-flop win % of the 169 canonical
+  hold'em starting hands vs N−1 random opponents. Data = `calculator/odds.json`
+  (`{ "AKs": [p2..p10], … }` in percent), generated ONCE by `calculator/poker.py`
+  (uv single-file script, 1M Monte-Carlo deals/cell ≈ ±0.1pp, `make odds` in
+  `calculator/`, ~15 min) and checked in — the tab lazy-fetches it on first show
+  (`showOdds`). UI (`buildOddsDom`/`renderOdds`): 13×13 grid (pairs on the
+  diagonal, suited upper-right, offsuit lower-left, A→2 header row/col) + a
+  rank-ordered table (Rank/Hand/Win %) in a left panel exactly as tall as the grid
+  (absolute + `overflow-y:auto`); noUiSlider for player count (2–10, value on the
+  thumb); color-scale pill = Bootstrap `btn-check` radio group — **Relative**
+  (percentile rank among the 169 hands → hue 0° red…120° green) vs **Break-even**
+  (log₂-scaled vs the 1/players fair share, yellow at exactly break-even; the pill
+  label shows the current break-even %). Plain-English hovers everywhere
+  ("Pair of 7s", "Ace-King Suited") via ONE delegated `bootstrap.Tooltip`
+  (`animation:false, delay:0` — instant, per user demand). Like Input, showing the
+  tab hides the Transfers graph card. No text slop: no captions, footers, or legends.
+  **Font:** `#pane-odds` is pinned to **Inter** even in poker mode — the Special Elite
+  casino face is too hard to read for a dense grid of numbers.
+
 ## TODO / future ideas
 - **Link heading to the editable sheet when possible.** Today `appTitle.href = db`
   (the pubhtml URL). For a *normal* `/spreadsheets/d/<ID>/…` link we could extract
@@ -180,5 +212,10 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 ## Deploy / test
 - `deploy.yml`: official Pages flow on push to `main`. **Repo setting:** Settings →
   Pages → Source = **GitHub Actions**. Remote: `github.com/pathikrit/group_iou`.
+  - It's a **pure static upload** (`upload-pages-artifact` with `path: .`) — it does
+    **NOT** build anything, so `calculator/odds.json` (checked in) is served as-is at
+    `<site>/calculator/odds.json` (the Odds tab fetches that relative path). CI never
+    runs `poker.py`; regenerating `odds.json` is a **one-time local** `make odds` in
+    `calculator/` (~15 min), then commit the new JSON.
 - Local: `python3 -m http.server` → `http://localhost:8000/` (not `file://`).
 - Sanity after JS edits: extract last `<script>` and `node --check` it.
