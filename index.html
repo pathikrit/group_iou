@@ -111,7 +111,7 @@
           <div class="d-flex align-items-center gap-3 mb-3">
             <div class="d-flex gap-2 flex-grow-1">
               <a id="dbOpen" class="btn btn-lg btn-primary" href="#" target="_blank" rel="noopener">Open</a>
-              <button id="dbRefresh" class="btn btn-lg btn-outline-secondary" type="button">Refresh</button>
+              <button id="dbUpdate" class="btn btn-lg btn-outline-secondary" type="button">Update</button>
             </div>
             <div class="form-check form-switch m-0 flex-shrink-0 fs-4">
               <input class="form-check-input" type="checkbox" role="switch" id="pokerToggle" title="Poker mode">
@@ -142,10 +142,14 @@
 
 <script>
 /* ===================== CONFIG ===================== */
-// Default sheet used on first load (the last-loaded sheet is remembered locally).
-const DEMO = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQLcZzzLn04LIt9xnaa43mMZyt1xUiisn2SzZ8Zbo1QeWnhyB1roNjwqw0EG9hvMwGGDYurUSwK5Oxv/pubhtml?gid=0&single=true";
+// THE sheet this app reads — hardcoded (no URL entry anywhere in the UI).
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQLcZzzLn04LIt9xnaa43mMZyt1xUiisn2SzZ8Zbo1QeWnhyB1roNjwqw0EG9hvMwGGDYurUSwK5Oxv/pubhtml?gid=0&single=true";
+const STORE_KEY = 'iou_db';   // remembers a user-entered sheet URL (Update button) across reloads
+// The sheet to load: a user-entered URL saved in localStorage, else the hardcoded default.
+function currentSheetUrl(){
+  try { return localStorage.getItem(STORE_KEY) || SHEET_URL; } catch(e) { return SHEET_URL; }
+}
 const EPS = 0.005;          // net-zero tolerance (< 1 cent)
-const STORE_KEY = 'iou_db'; // remembers the last sheet URL across reloads
 const PALETTE = d3.schemeTableau10;   // categorical colors for names
 const MAX_EXACT_N = 15;     // exact partition DP up to this many active people
 const MAX_TREE_S  = 8;      // exact spanning-tree search up to this group size
@@ -516,7 +520,6 @@ let graphNodes = [];         // nodes currently drawn (people in 'balances' mode
 let graphMode = 'balances';  // 'balances' = settlement graph; 'txn' = raw transfer ledger graph
 let fontChecked = false;     // one-shot: re-render chips once the web fonts finish loading
 let txnNet = true;           // txn graph: true = net per pair (≤1 edge), false = both directions
-let currentDb = '';          // sheet URL currently loaded (localStorage[STORE_KEY] or DEMO)
 let rawPeople = [];          // [{name, values:[...]}] one value per dataset column
 let datasets = [];           // [{label, col?}] value columns (incl. virtual All Time)
 let selectedDataset = 0;
@@ -1059,7 +1062,8 @@ function setStatus(kind, msg){
 const showTab = id => bootstrap.Tab.getOrCreateInstance(document.getElementById(id)).show();
 
 /* ===================== MAIN ===================== */
-// Fetch + render a sheet. No URL params — the sheet comes from the UI / storage.
+// Fetch + render a sheet. No URL params — the sheet is currentSheetUrl() (a saved
+// localStorage override, else the hardcoded SHEET_URL default).
 // Stale-while-revalidate: render the cached copy instantly, then fetch fresh in
 // the background and re-render only if the CSV actually changed.
 async function load(db){
@@ -1068,7 +1072,6 @@ async function load(db){
   document.getElementById('settleCard').classList.add('d-none');
 
   // point the Input tab's Open button + preview and the title link at the sheet
-  currentDb = db;
   document.getElementById('dbOpen').href = db;
   document.getElementById('appTitle').href = db;
   document.getElementById('srcFrame').src = db;
@@ -1102,7 +1105,7 @@ async function load(db){
       ? ' You are opening this file directly (file://), which browsers block from fetching. ' +
         'Serve it over http — e.g. <code>python3 -m http.server</code> then open ' +
         '<code>http://localhost:8000/</code> — or use the deployed GitHub Pages URL.'
-      : ' Make sure the sheet is published to the web, then hit <em>Refresh</em> in the <em>Input</em> tab.';
+      : ' Make sure the sheet is published to the web, then hit <em>Update</em> in the <em>Input</em> tab.';
     setStatus('error', 'Could not load the sheet (' + escapeHtml(e.message) + ').' + fileHint);
     document.getElementById('tableCard').classList.remove('d-none');
     showTab('tab-input');
@@ -1428,15 +1431,19 @@ function main(){
     pokerUserSet = true;
     setPokerMode(e.target.checked);
   });
-  // re-run the load pipeline for the current sheet (stale-while-revalidate picks
-  // up any changes) and jump back to the Balances tab
-  document.getElementById('dbRefresh').addEventListener('click', () => {
+  // Update: prompt for a sheet URL (pre-filled with the current one — the saved
+  // localStorage URL or the hardcoded default), save the entry to localStorage, then
+  // load it and jump back to Balances. Cancel or an empty entry leaves things as-is.
+  document.getElementById('dbUpdate').addEventListener('click', () => {
+    const next = prompt('Google Sheet URL (published to the web):', currentSheetUrl());
+    if(next === null) return;                          // Cancel
+    const url = next.trim();
+    if(!url) return;                                   // empty -> ignore
+    try { localStorage.setItem(STORE_KEY, url); } catch(e) {}
     showTab('tab-bal');
-    load(currentDb);
+    load(url);
   });
-  let saved = null;
-  try { saved = localStorage.getItem(STORE_KEY); } catch(e) {}
-  load(saved || DEMO);
+  load(currentSheetUrl());
 }
 
 main();

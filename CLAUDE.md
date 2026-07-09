@@ -45,11 +45,13 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
-- Sheet is the pubhtml URL from `localStorage[STORE_KEY]` (else `DEMO`); there is
-  **no URL entry in the UI** (and **no URL params**) — the Input tab has an
-  **Open** button (`#dbOpen`, opens the sheet) and a **Refresh** button
-  (`#dbRefresh`, re-runs `load(currentDb)` + jumps to Balances). Switching sheets
-  = editing `STORE_KEY` by hand.
+- Sheet URL = a user-entered override saved in `localStorage['iou_db']` (`STORE_KEY`),
+  else the hardcoded `SHEET_URL` pubhtml default (`currentSheetUrl()`). **No URL
+  params.** The Input tab has an **Open** button (`#dbOpen`, opens the current sheet)
+  and an **Update** button (`#dbUpdate`): a `prompt()` pre-filled with
+  `currentSheetUrl()` — on OK, saves the entry to `localStorage['iou_db']`, then
+  `load()`s it + jumps to Balances (Cancel / empty = no change). Initial load and
+  Open/title links all follow `currentSheetUrl()`.
 - pubhtml → CSV via `toCsvUrl` (`/pub?...&output=csv`); Google sends
   `Access-Control-Allow-Origin: *` so we fetch directly (no proxy).
   - `file://` (null origin) is blocked by browsers → must serve over http(s); the
@@ -183,7 +185,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   (the pubhtml URL). For a *normal* `/spreadsheets/d/<ID>/…` link we could extract
   `<ID>` (regex `/spreadsheets/d/(?!e/)<ID>/`) and point the heading at
   `…/d/<ID>/edit#gid=<gid>`. NOT derivable for the "publish to web"
-  `/d/e/2PACX-1v…/pubhtml` form (incl. the DEMO): that `2PACX-1v…` token is an
+  `/d/e/2PACX-1v…/pubhtml` form (incl. `SHEET_URL`): that `2PACX-1v…` token is an
   opaque, one-way publish ID with no client-side mapping to the real doc ID — so
   for publish-form links keep linking to the published view. (Going further would
   mean accepting `/d/<ID>/` URLs as a data source via `export?format=csv`/`gviz`,
