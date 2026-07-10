@@ -24,8 +24,9 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 - `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
   the tiny `<style>` block is deliberately minimal — a darker palette (via Bootstrap's
   own `--bs-*` CSS variables, its theming hook), the Graphviz SVG internals (no
-  Bootstrap equivalent), and the Transactions scroll/sticky-header + graph
-  min-height/width. **Font sizes are left to Bootstrap defaults; everything else must
+  Bootstrap equivalent), the Transactions scroll/sticky-header + graph
+  min-height/width, and the poker-mode root-font scale (`html:has(body.poker-ui)`,
+  see Poker mode). **Font sizes are left to Bootstrap defaults; everything else must
   be Bootstrap components/utilities — do not hand-roll CSS or font sizing.**
 - `bootstrap-table@1.27.3` (+ its CSS) drives the **Balances table** — sortable
   columns (#, Name chip, Balance), init in `initBalTable`, rows loaded in
@@ -153,11 +154,15 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `seenCount` = #dated columns the person appears in); both toggled via
   bootstrap-table `showColumn`/`hideColumn`, and the **highest-average person gets a
   👑** prefixed to their medal suffix.
-- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Refresh in the
+- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Update in the
   **Input** tab): a win/loss framing, on by default when the **sheet
   title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`
-  (mirrors `userPicked`), and `setPokerMode` syncs the switch + re-renders the table
-  & balance graph. When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
+  (mirrors `userPicked`), and `setPokerMode` toggles `body.poker-ui` (swaps the app
+  font Inter→Special Elite, title→Rye) + re-renders the table & active graph. Special
+  Elite is chunkier than Inter, so `html:has(body.poker-ui)` drops the root font ~2px
+  (87.5%) while poker is on, keeping every rem-sized component at ~Inter's footprint so
+  the toggle doesn't reflow the page (graph chips self-size in SVG units, so they're
+  exempt). When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
   crown) anywhere — the single gate is **`rankEmoji(rank,count,gold)`** (returns ''
   unless poker; `gold` = 👑 in the graph, 🥇 in the table), which both `emojiFor` and
   `tableMedal` delegate to, so no caller branches on `pokerMode`; magnitude/👻/🤷

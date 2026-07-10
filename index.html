@@ -38,6 +38,13 @@
   body{ --bs-body-font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
         font-variant-numeric:tabular-nums; }
   body.poker-ui{ --bs-body-font-family:'Special Elite','Inter',monospace; }
+  /* Special Elite renders chunkier/wider than Inter, so without compensation flipping
+     poker mode enlarges every rem-sized component (tabs, buttons, pills, tables) and
+     reflows the page. While poker mode is on, take the ROOT font down ~2px (16→14 =
+     87.5%) so the heavier face keeps roughly Inter's footprint and nothing shifts —
+     one lever that reaches all rem sizing. (`:has` keeps the toggle on <body>; the
+     graph chips size themselves in SVG units, so they're unaffected.) */
+  html:has(body.poker-ui){ font-size:87.5%; }
   body.poker-ui #appTitle{ font-family:'Rye','Special Elite',cursive; }
   .card{--bs-card-bg:#171a21; --bs-card-border-color:#2a2f3a}
   .nav-tabs{--bs-nav-tabs-border-color:#2a2f3a}
