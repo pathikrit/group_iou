@@ -24,8 +24,9 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
 - `bootstrap@5.3.3` (CSS + bundle JS) — UI framework. `<html data-bs-theme="dark">`;
   the tiny `<style>` block is deliberately minimal — a darker palette (via Bootstrap's
   own `--bs-*` CSS variables, its theming hook), the Graphviz SVG internals (no
-  Bootstrap equivalent), and the Transactions scroll/sticky-header + graph
-  min-height/width. **Font sizes are left to Bootstrap defaults; everything else must
+  Bootstrap equivalent), the Transactions scroll/sticky-header + graph
+  min-height/width, and the poker-mode root-font scale (`html:has(body.poker-ui)`,
+  see Poker mode). **Font sizes are left to Bootstrap defaults; everything else must
   be Bootstrap components/utilities — do not hand-roll CSS or font sizing.**
 - `bootstrap-table@1.27.3` (+ its CSS) drives the **Balances table** — sortable
   columns (#, Name chip, Balance), init in `initBalTable`, rows loaded in
@@ -43,16 +44,26 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
   as soon as the target tab is *visible* (retried from `renderTable` once `tableCard`
   shows, and from `setPokerMode` once the Odds tab appears). This is nav state only —
   **not** a data-source param (the hash is separate from the "No URL params" rule below).
-  Dataset toggle (`#dsToggle`, `renderDatasetToggle`): IOUs/All
-  Time as `btn-lg rounded-pill` CTA buttons, then dated columns rightmost-first in a
-  Bootstrap `.btn-group`, overflow (> `MAX_DATED_PILLS`) in a **nested `.btn-group`
-  dropdown** ("More"); active state via `markActiveDataset`. Status banner = a
-  Bootstrap `.alert` (`setStatus`). Net toggle = a Bootstrap `.form-switch`.
+  Dataset toggle (`#dsToggle`, `renderDatasetToggle`): All Time
+  as a `rounded-pill` CTA button, then dated columns rightmost-first in a
+  Bootstrap `.btn-group`. **Desktop (≥ md)**: a row; pills past `MAX_DATED_PILLS`
+  collapse into a **nested `.btn-group` dropdown** ("More", `d-none d-md-flex`).
+  **Mobile (< md)**: the container stacks (`flex-column flex-md-row`) — All Time
+  full-width, then ALL dated pills below in ONE horizontally scrollable line (the
+  overflow pills are `d-md-none` twins of the dropdown items; the scroll rule is
+  the `#dsToggle .btn-group` media query in the `<style>` block — Bootstrap has no
+  responsive overflow utility). Active state via `markActiveDataset`. Status banner = a
+  Bootstrap `.alert` (`setStatus`).
 
 ## Data flow (`load` → `applyCsv` → `showDataset`)
-- Sheet is the pubhtml URL, entered in the **Input** tab; remembered in
-  `localStorage[STORE_KEY]`. First run uses `DEMO`. **No URL params** for the data
-  source (the URL *hash* is used only for tab deep-links — see Tabs above).
+- Sheet URL = a user-entered override saved in `localStorage['iou_db']` (`STORE_KEY`),
+  else the hardcoded `SHEET_URL` pubhtml default (`currentSheetUrl()`). **No URL
+  params** for the data source (the URL *hash* is nav-only — tab deep-links, see Tabs).
+  The Input tab has an **Open** button (`#dbOpen`, opens the current sheet)
+  and an **Update** button (`#dbUpdate`): a `prompt()` pre-filled with
+  `currentSheetUrl()` — on OK, saves the entry to `localStorage['iou_db']`, then
+  `load()`s it + jumps to Balances (Cancel / empty = no change). Initial load and
+  Open/title links all follow `currentSheetUrl()`.
 - pubhtml → CSV via `toCsvUrl` (`/pub?...&output=csv`); Google sends
   `Access-Control-Allow-Origin: *` so we fetch directly (no proxy).
   - `file://` (null origin) is blocked by browsers → must serve over http(s); the
@@ -73,20 +84,21 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
     column → hidden); `Total` row skipped. No labels (old format) → single
     `Balance` column, no toggle.
   - Ledger → `transactions` `[{from, to, date, amount}]`. **When a ledger exists**,
-    two **virtual datasets are prepended**: **`All Time`** = per-person sum of the
-    dated columns (base owed, ignoring settlements), and **`IOUs`** = All Time
-    after applying the ledger (each transfer: payer `+amount`, payee `−amount`) =
-    what's still outstanding. Both are unshifted onto every
+    one **virtual dataset is prepended**: **`All Time`** = per-person sum of the
+    dated columns (base owed, ignoring settlements), unshifted onto every
     `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged.
+    Each person also gets **`rawPeople[i].iou`** = All Time after applying the
+    ledger (each transfer: payer `+amount`, payee `−amount`) = what's still
+    outstanding — NOT a dataset; it's shown as the **IOUs table column** in the
+    All Time view (see UI specifics).
     **`All Time` is the default selected column** until the user clicks a pill
     (`userPicked` flag; then their choice persists across revalidation). A name
     only in the ledger (not in any dated column) still gets a row (`All Time` = 0).
-    Toggle order: `IOUs | All Time | <dates…>` (`IOUs`/`All Time` render as larger
-    CTA pills). No ledger → legacy behavior (no computed columns, no Transactions
-    tab).
+    Toggle order: `All Time | <dates…>` (`All Time` renders as a larger CTA pill).
+    No ledger → legacy behavior (no computed column, no Transactions tab).
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
-  else error + no graph. (Both base and ledger are net-zero, so `IOUs`/`All Time`
-  stay net-zero.)
+  else error + no graph. (Both base and ledger are net-zero, so `All Time` — and
+  the `iou` values — stay net-zero.)
 
 ## Algorithm (`computeTransfers`) — three constraints, applied strictly in order
 The code MUST follow these exactly; keep the matching comment in `computeTransfers`.
@@ -113,36 +125,44 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
   `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
   `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
-  (URL + iframe). **Transfers** card just shows the graph (no tabs) — no textual
-  transfer list, graph only. It's **never shown while the Input tab is active**: the
-  `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal goes through
-  `showGraphCard()` which no-ops when `#tab-input` is `.active` — so re-renders (e.g.
-  toggling poker mode) can't pop it back open. The bal/txn tabs re-render & re-show.
-- **The Transfers graph follows the active tab** (`graphMode`, switched by
-  `shown.bs.tab` on `#tab-bal`/`#tab-txn`): on **Balances** it's the *settlement*
-  graph (`renderBalGraph` → `computeTransfers`, name+balance+emoji nodes); on
-  **Transactions** it's the *raw ledger* graph (`renderTxnGraph`/`txnGraphData`) —
-  **no settlement algorithm**, just the ledger summed per directed `(from,to)` pair
-  (a dense all-pairs graph is fine), `$0` edges dropped, name-only nodes.
-  `buildDot`/`applyGraphSelection` operate on `graphNodes` (the nodes currently
-  drawn) so highlight/selection work in both modes.
-- **Net toggle** (`#netToggle`, `txnNet`, shown only in the txn graph via
-  `#netToggleWrap`): on (default) collapses each pair to a single edge in the
-  surplus direction (`A→B` minus `B→A`); off keeps both directions (≤2 edges/pair).
-  Edges are always positive `from→to`; a pair that evens out shows no edge.
+  (Open/Update + iframe). **Transfers** card (`#settleCard`) just shows the graph (no
+  tabs) — no textual transfer list, graph only. It's **never shown while the Input tab
+  is active**: the `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal
+  goes through `showGraphCard()` which no-ops when `#tab-input` is `.active` — so
+  re-renders (e.g. toggling poker mode) can't pop it back open. The bal/txn tabs
+  re-render & re-show.
+- **The Transfers graph is ALWAYS a settlement graph** (`computeTransfers`,
+  name+balance+emoji nodes) — only *which balances feed it* changes with the active
+  tab (`renderActiveGraph`, on `shown.bs.tab` for `#tab-bal`/`#tab-txn`). On
+  **Balances** it settles the *selected dataset column* (`renderBalGraph` → `people`);
+  on **Transactions** it settles the *outstanding IOUs* (`renderIouGraph` →
+  `rawPeople[i].iou`, what's still owed after the ledger — Bob evened out shows as a
+  `$0`/👻 node). Both go through `renderSettlementGraph(balances)` (sort, emoji-tag by
+  its own pot, draw). **Card placement** follows the tab too (`placeGraphCard`): home
+  slot below the table card on Balances, moved to the **top of the txn pane, above the
+  `#txnTable` list**, on Transactions. `buildDot`/`applyGraphSelection` operate on
+  `graphNodes` so highlight/selection work in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
-  dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`); IOUs
-  gets none. **All Time** instead shows each person's medals *accumulated* across all
-  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, a kind with >5
-  collapsed to e.g. `🥇×11`). All Time also adds an **Average** column (balance ÷
-  `seenCount` = #dated columns the person appears in; shown via bootstrap-table
-  `showColumn`/`hideColumn`), and the **highest-average person gets a 👑** prefixed
-  to their medal suffix.
-- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Load in the
+  dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
+  **All Time** instead shows each person's medals *accumulated* across all
+  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
+  medal-then-count token like `🥇×11` — a single medal stays bare, no `×1` — wrapped in a
+  `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
+  👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds — between Balance and Average — an
+  **IOUs** column (`rawPeople[i].iou`, what's still outstanding after the ledger;
+  shown whenever a ledger exists, any mode) and an **Average** column (balance ÷
+  `seenCount` = #dated columns the person appears in); both toggled via
+  bootstrap-table `showColumn`/`hideColumn`, and the **highest-average person gets a
+  👑** prefixed to their medal suffix.
+- **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Update in the
   **Input** tab): a win/loss framing, on by default when the **sheet
   title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`
-  (mirrors `userPicked`), and `setPokerMode` syncs the switch + re-renders the table
-  & balance graph. When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
+  (mirrors `userPicked`), and `setPokerMode` toggles `body.poker-ui` (swaps the app
+  font Inter→Special Elite, title→Rye) + re-renders the table & active graph. Special
+  Elite is chunkier than Inter, so `html:has(body.poker-ui)` drops the root font ~2px
+  (87.5%) while poker is on, keeping every rem-sized component at ~Inter's footprint so
+  the toggle doesn't reflow the page (graph chips self-size in SVG units, so they're
+  exempt). When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
   crown) anywhere — the single gate is **`rankEmoji(rank,count,gold)`** (returns ''
   unless poker; `gold` = 👑 in the graph, 🥇 in the table), which both `emojiFor` and
   `tableMedal` delegate to, so no caller branches on `pokerMode`; magnitude/👻/🤷
@@ -203,7 +223,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   (the pubhtml URL). For a *normal* `/spreadsheets/d/<ID>/…` link we could extract
   `<ID>` (regex `/spreadsheets/d/(?!e/)<ID>/`) and point the heading at
   `…/d/<ID>/edit#gid=<gid>`. NOT derivable for the "publish to web"
-  `/d/e/2PACX-1v…/pubhtml` form (incl. the DEMO): that `2PACX-1v…` token is an
+  `/d/e/2PACX-1v…/pubhtml` form (incl. `SHEET_URL`): that `2PACX-1v…` token is an
   opaque, one-way publish ID with no client-side mapping to the real doc ID — so
   for publish-form links keep linking to the published view. (Going further would
   mean accepting `/d/<ID>/` URLs as a data source via `export?format=csv`/`gviz`,
