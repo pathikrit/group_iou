@@ -140,8 +140,10 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `$0`/👻 node). Both go through `renderSettlementGraph(balances)` (sort, emoji-tag by
   its own pot, draw). **Card placement** follows the tab too (`placeGraphCard`): home
   slot below the table card on Balances, moved to the **top of the txn pane, above the
-  `#txnTable` list**, on Transactions. `buildDot`/`applyGraphSelection` operate on
-  `graphNodes` so highlight/selection work in both.
+  `#txnTable` list**, on Transactions — where an **`#iouGraphLabel` "IOUs" heading** sits
+  above the graph (toggled in `renderActiveGraph`, shown only for the IOU graph).
+  `buildDot`/`applyGraphSelection` operate on `graphNodes` so highlight/selection work
+  in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
   dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
   **All Time** instead shows each person's medals *accumulated* across all
