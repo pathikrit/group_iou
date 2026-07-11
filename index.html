@@ -195,6 +195,8 @@
 
   <div id="settleCard" class="card mb-3 d-none">
     <div class="card-body">
+      <!-- shown only for the outstanding-IOU graph (Transactions tab), toggled in renderActiveGraph -->
+      <h2 id="iouGraphLabel" class="h5 text-center mb-3 d-none">IOUs</h2>
       <div id="graph" class="overflow-hidden text-center"></div>
     </div>
   </div>
@@ -1332,6 +1334,7 @@ function showGraphCard(){
 function renderActiveGraph(){
   const onTxn = document.getElementById('tab-txn').classList.contains('active');
   placeGraphCard(onTxn);
+  document.getElementById('iouGraphLabel').classList.toggle('d-none', !onTxn);   // "IOUs" heading only for the IOU graph
   if(onTxn) renderIouGraph(); else renderBalGraph();
 }
 
