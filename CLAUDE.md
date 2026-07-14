@@ -89,13 +89,13 @@ draws the fewest money transfers to settle up, as an interactive DOT graph.
     `rawPeople[i].values[]` so the index-based `showDataset(idx)` is unchanged.
     Each person also gets **`rawPeople[i].iou`** = All Time after applying the
     ledger (each transfer: payer `+amount`, payee `−amount`) = what's still
-    outstanding — NOT a dataset; it's shown as the **IOUs table column** in the
-    All Time view (see UI specifics).
+    outstanding — NOT a dataset and NOT a table column; it feeds only the
+    **outstanding-IOU settlement graph on the IOUs tab** (see UI specifics).
     **`All Time` is the default selected column** until the user clicks a pill
     (`userPicked` flag; then their choice persists across revalidation). A name
     only in the ledger (not in any dated column) still gets a row (`All Time` = 0).
     Toggle order: `All Time | <dates…>` (`All Time` renders as a larger CTA pill).
-    No ledger → legacy behavior (no computed column, no Transactions tab).
+    No ledger → legacy behavior (no computed column, no IOUs tab).
 - Amounts: `$`, commas, `(123)`/`-` negatives, cents. Asserts net `$0` within `EPS`;
   else error + no graph. (Both base and ledger are net-zero, so `All Time` — and
   the `iou` values — stay net-zero.)
@@ -122,26 +122,29 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 
 ## UI specifics
 - **Balances** card is tabbed: **Balances** (table + dataset toggle) /
-  **Transactions** (the parsed ledger — a second bootstrap-table `#txnTable`,
-  `initTxnTable`/`renderTxnTable`; From/To name chips colored per-person via
-  `colorForName`/`nameChip`; tab hidden via `d-none` when no ledger) / **Input**
-  (Open/Update + iframe). **Transfers** card (`#settleCard`) just shows the graph (no
-  tabs) — no textual transfer list, graph only. It's **never shown while the Input tab
-  is active**: the `shown.bs.tab` on `#tab-input` hides it (`d-none`), and every reveal
-  goes through `showGraphCard()` which no-ops when `#tab-input` is `.active` — so
-  re-renders (e.g. toggling poker mode) can't pop it back open. The bal/txn tabs
-  re-render & re-show.
+  **IOUs** (label of the `#tab-txn`/`#pane-txn` tab — internal ids and the
+  `#transactions` deep-link hash keep the "txn" name; hidden via `d-none` when no
+  ledger) / **Input** (Open/Update + iframe). The IOUs tab holds the outstanding-IOU
+  settlement graph on top (see below) and the parsed ledger below it — a second
+  bootstrap-table `#txnTable`, `initTxnTable`/`renderTxnTable`; From/To name chips
+  colored per-person via `colorForName`/`nameChip`. **Transfers** card (`#settleCard`)
+  just shows the graph (no tabs) — no textual transfer list, graph only. It's **never
+  shown while the Input or Odds tab is active**: the `shown.bs.tab` on `#tab-input` /
+  `#tab-odds` hides it (`d-none`), and every reveal goes through `showGraphCard()`
+  which no-ops when `#tab-input` OR `#tab-odds` is `.active` — so re-renders (e.g.
+  toggling poker mode, which on a fresh `#odds` deep-link runs `renderActiveGraph`
+  right after switching to Odds) can't pop it back open. The bal/txn tabs re-render &
+  re-show.
 - **The Transfers graph is ALWAYS a settlement graph** (`computeTransfers`,
   name+balance+emoji nodes) — only *which balances feed it* changes with the active
   tab (`renderActiveGraph`, on `shown.bs.tab` for `#tab-bal`/`#tab-txn`). On
   **Balances** it settles the *selected dataset column* (`renderBalGraph` → `people`);
-  on **Transactions** it settles the *outstanding IOUs* (`renderIouGraph` →
+  on the **IOUs** tab it settles the *outstanding IOUs* (`renderIouGraph` →
   `rawPeople[i].iou`, what's still owed after the ledger — Bob evened out shows as a
   `$0`/👻 node). Both go through `renderSettlementGraph(balances)` (sort, emoji-tag by
   its own pot, draw). **Card placement** follows the tab too (`placeGraphCard`): home
   slot below the table card on Balances, moved to the **top of the txn pane, above the
-  `#txnTable` list**, on Transactions — where an **`#iouGraphLabel` "IOUs" heading** sits
-  above the graph (toggled in `renderActiveGraph`, shown only for the IOU graph).
+  `#txnTable` list**, on the IOUs tab (no separate heading — the tab name says "IOUs").
   `buildDot`/`applyGraphSelection` operate on `graphNodes` so highlight/selection work
   in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
@@ -150,12 +153,11 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
   medal-then-count token like `🥇×11` — a single medal stays bare, no `×1` — wrapped in a
   `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
-  👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds — between Balance and Average — an
-  **IOUs** column (`rawPeople[i].iou`, what's still outstanding after the ledger;
-  shown whenever a ledger exists, any mode) and an **Average** column (balance ÷
-  `seenCount` = #dated columns the person appears in); both toggled via
-  bootstrap-table `showColumn`/`hideColumn`, and the **highest-average person gets a
-  👑** prefixed to their medal suffix.
+  👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds an
+  **Average** column (balance ÷ `seenCount` = #dated columns the person appears in),
+  toggled via bootstrap-table `showColumn`/`hideColumn`, and the **highest-average
+  person gets a 👑** prefixed to their medal suffix. (Outstanding IOUs are NOT a table
+  column — they live only on the IOUs tab's settlement graph.)
 - **Poker mode** (`pokerMode`, `#pokerToggle` 🃏 `.form-switch` next to Update in the
   **Input** tab): a win/loss framing, on by default when the **sheet
   title matches `/poker/i`** (`setTitle`); manual toggle sticks via `pokerUserSet`

@@ -134,7 +134,7 @@
           <button class="nav-link active" id="tab-bal" data-bs-toggle="tab" data-bs-target="#pane-bal" type="button" role="tab">Balances</button>
         </li>
         <li class="nav-item d-none" id="txnTab" role="presentation">
-          <button class="nav-link" id="tab-txn" data-bs-toggle="tab" data-bs-target="#pane-txn" type="button" role="tab">Transactions</button>
+          <button class="nav-link" id="tab-txn" data-bs-toggle="tab" data-bs-target="#pane-txn" type="button" role="tab">IOUs</button>
         </li>
         <li class="nav-item d-none" id="oddsTab" role="presentation">
           <button class="nav-link" id="tab-odds" data-bs-toggle="tab" data-bs-target="#pane-odds" type="button" role="tab">Odds</button>
@@ -195,8 +195,6 @@
 
   <div id="settleCard" class="card mb-3 d-none">
     <div class="card-body">
-      <!-- shown only for the outstanding-IOU graph (Transactions tab), toggled in renderActiveGraph -->
-      <h2 id="iouGraphLabel" class="h5 text-center mb-3 d-none">IOUs</h2>
       <div id="graph" class="overflow-hidden text-center"></div>
     </div>
   </div>
@@ -927,7 +925,7 @@ function clearSelection(){
   applyGraphSelection();
 }
 
-// Green/red signed whole-dollar cell (Balance / IOUs / Average columns).
+// Green/red signed whole-dollar cell (Balance / Average columns).
 function signedCell(v){
   if(v == null) return '';
   const c = Math.abs(v) <= EPS ? 'text-secondary' : (v < 0 ? 'text-danger' : 'text-success');
@@ -944,10 +942,6 @@ function initBalTable(){
         formatter: (v, row) =>
           `<span class="badge" style="background-color:${row.color};color:${textOn(row.color)}">${escapeHtml(v)}</span>${row.medal ? ' ' + row.medal : ''}` },
       { field: 'amount', title: 'Balance', align: 'right', valign: 'middle', sortable: true,
-        sorter: (a, b) => a - b, formatter: signedCell },
-      // IOUs = what's still outstanding after the settlement ledger; shown only for
-      // the All Time column when a ledger exists (see renderTable)
-      { field: 'iou', title: 'IOUs', align: 'right', valign: 'middle', sortable: true, visible: false,
         sorter: (a, b) => a - b, formatter: signedCell },
       // Average = balance ÷ times seen; shown only for the All Time column (see renderTable)
       { field: 'average', title: 'Average', align: 'right', valign: 'middle', sortable: true, visible: false,
@@ -1014,15 +1008,13 @@ function seenCount(rawIdx){
 function renderTable(){
   const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
   const n = people.length;
-  // All Time accumulates medals from every dated column + shows an IOUs column
-  // (what's still outstanding after the ledger) and an Average column (balance ÷
-  // times seen); dated columns get their own 🥇/🥈/💩. Medals, crown and the
-  // Average column are poker-mode features (the rankEmoji gate already empties
+  // All Time accumulates medals from every dated column + shows an Average column
+  // (balance ÷ times seen); dated columns get their own 🥇/🥈/💩. Medals, crown and
+  // the Average column are poker-mode features (the rankEmoji gate already empties
   // medals when off) — off means a plain ledger sorted by balance (so All Time
-  // behaves like any dated column).
+  // behaves like any dated column). (Outstanding IOUs live only on the IOUs tab.)
   const isAllTime = label === 'All Time';
   const showAverage = isAllTime && pokerMode;
-  const showIou = isAllTime && transactions.length > 0;
   const acc = isAllTime ? accumulatedMedals() : null;
 
   // Averages (computed once) + the top average gets a 👑 (suffixed first). All Time
@@ -1047,12 +1039,10 @@ function renderTable(){
     }else medal = tableMedal(i, n);
     const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
-    if(showIou) row.iou = rawPeople[p.idx].iou;
     if(showAverage) row.average = avg.get(p.name);
     return row;
   });
   $('#balTable').bootstrapTable('load', rows);
-  $('#balTable').bootstrapTable(showIou ? 'showColumn' : 'hideColumn', 'iou');
   $('#balTable').bootstrapTable(showAverage ? 'showColumn' : 'hideColumn', 'average');
   $('#balTable').bootstrapTable('sortBy', showAverage
     ? { field: 'average', sortOrder: 'desc' } : { field: 'amount', sortOrder: 'desc' });
@@ -1320,11 +1310,13 @@ function showDataset(idx){
   renderActiveGraph();
 }
 
-// Reveal the Transfers graph card — but NEVER while the Input tab is active (the
-// graph is irrelevant there, and re-renders, e.g. toggling poker mode, must not pop
-// it back open).
+// Reveal the Transfers graph card — but NEVER while the Input or Odds tab is active
+// (the graph is irrelevant on both, and re-renders — e.g. toggling poker mode, which
+// on a fresh #odds deep-link runs renderActiveGraph right after switching to Odds —
+// must not pop it back open).
 function showGraphCard(){
-  if(document.getElementById('tab-input').classList.contains('active')) return;
+  if(document.getElementById('tab-input').classList.contains('active') ||
+     document.getElementById('tab-odds').classList.contains('active')) return;
   document.getElementById('settleCard').classList.remove('d-none');
 }
 
@@ -1334,7 +1326,6 @@ function showGraphCard(){
 function renderActiveGraph(){
   const onTxn = document.getElementById('tab-txn').classList.contains('active');
   placeGraphCard(onTxn);
-  document.getElementById('iouGraphLabel').classList.toggle('d-none', !onTxn);   // "IOUs" heading only for the IOU graph
   if(onTxn) renderIouGraph(); else renderBalGraph();
 }
 
