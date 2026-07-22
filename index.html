@@ -1685,12 +1685,19 @@ function renderOdds(){
   const idx = n - 2, be = 100 / n;
   const sorted = Object.values(odds).map(a => a[idx]).sort((a, b) => a - b);
   document.getElementById('oddsBeLabel').textContent = `Break-even (${be.toFixed(1)}%)`;
-  const hueFor = eq => oddsMode === 'relative'
-    ? 120 * sorted.indexOf(eq) / (sorted.length - 1)  // red 0° .. green 120°
-    : 60 + 60 * Math.max(-1, Math.min(1, Math.log2(eq / be)));
+  const colorFor = eq => {
+    if(oddsMode === 'relative')
+      return oddsColor(120 * sorted.indexOf(eq) / (sorted.length - 1));  // red 0° .. green 120°
+    // break-even: signed distance from the fair share (t<0 below, t>0 above), eased
+    // (m = |t|^0.6) so the scale is non-linear — greens get richer and reds darker
+    // faster away from the yellow break-even point (both sat up + lightness down with m).
+    const t = Math.max(-1, Math.min(1, Math.log2(eq / be)));
+    const m = Math.pow(Math.abs(t), 0.6);
+    return `hsl(${60 + 60 * Math.sign(t) * m}, ${62 + 22 * m}%, ${38 - 15 * m}%)`;
+  };
   for(const c of oddsCells){
     const eq = odds[c.label][idx];
-    c.div.style.background = oddsColor(hueFor(eq));
+    c.div.style.background = colorFor(eq);
     c.p.textContent = eq.toFixed(1) + '%';
   }
   Object.entries(odds).map(([label, a]) => [label, a[idx]])
@@ -1701,7 +1708,7 @@ function renderOdds(){
       hand.textContent = label;
       pct.textContent = eq.toFixed(1) + '%';
       for(const td of oddsRows[k]){
-        td.style.background = oddsColor(hueFor(eq));
+        td.style.background = colorFor(eq);
         td.dataset.bsToggle = 'tooltip';
         td.dataset.bsTitle = oddsDesc[label];
       }
