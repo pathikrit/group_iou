@@ -267,8 +267,7 @@ function setPokerMode(on){
   if(people.length){
     // node emojis are cached on each person (showDataset) — recompute so the rank
     // medals/crown appear/disappear with the mode
-    const pot = totalPot();
-    people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
+    tagEmojis(people, totalPot());
     renderTable();
     renderActiveGraph();   // re-render the active settlement graph (Balances or IOU) with the new emojis
   }
@@ -338,30 +337,51 @@ function moneySignedCell(v){
 // emoji tiers by % of the pot, so they scale regardless of the stakes.
 const totalPot = () => people.reduce((s, p) => s + (p.balance > 0 ? p.balance : 0), 0);
 
-// Win/loss ranking emoji for a person at `rank` of `count` (best-first): winner /
-// runner-up / last place. THE single source of the poker gate — returns '' unless
-// poker mode is on, so callers (graph + table) never branch on pokerMode. `gold` is
-// the winner glyph (👑 in the graph, 🥇 in the table).
-function rankEmoji(rank, count, gold){
+// 0-based competition ranks (1,1,3-style) for a descending-sorted list of values:
+// EPS-equal neighbors share their group's first index, so ties get the same # in
+// the table and the same rank emoji. ranks[n-1] is last place's rank (shared by
+// everyone tied at the bottom).
+function compRanks(vals){
+  const r = [];
+  vals.forEach((v, i) => r.push(i && Math.abs(v - vals[i - 1]) <= EPS ? r[i - 1] : i));
+  return r;
+}
+
+// Win/loss ranking emoji for a person at competition rank `rank` of `count`
+// (best-first): winner / runner-up / last place. Ties share a rank, so everyone
+// tied at a medal spot shows that medal (two golds -> no silver that night: nobody
+// holds rank 1). Last place outranks runner-up when a tie makes both apply (a
+// group tied at the bottom chops 💩, not 🥈) — without ties the two can't collide.
+// THE single source of the poker gate — returns '' unless poker mode is on, so
+// callers (graph + table) never branch on pokerMode. `gold` is the winner glyph
+// (👑 in the graph, 🥇 in the table).
+function rankEmoji(rank, count, gold, lastRank = count - 1){
   if(!pokerMode || count < 2) return '';
   if(rank === 0) return gold;
+  if(rank === lastRank) return '💩';
   if(rank === 1 && count >= 3) return '🥈';
-  if(rank === count - 1) return '💩';
   return '';
 }
 
 // Reaction emojis for a graph node. A person can get up to two: a rank emoji
 // (winner / 2nd / last) plus a magnitude emoji. The magnitude tier is chosen by the
-// balance as a % of the pot (so it scales regardless of stakes). rank is the
-// 0-based index in the descending-by-balance list; count is the number of people.
-function emojiFor(balance, pot, rank, count){
-  let e = rankEmoji(rank, count, '👑');
+// balance as a % of the pot (so it scales regardless of stakes). rank/lastRank are
+// tie-aware competition ranks (compRanks); count is the number of people.
+function emojiFor(balance, pot, rank, count, lastRank){
+  let e = rankEmoji(rank, count, '👑', lastRank);
   if(Math.abs(balance) <= EPS) return e + '👻';           // exact $0 (present, evened out)
   const pct = pot ? Math.abs(balance) / pot * 100 : 0;    // magnitude tiers, % of pot
   if(pct < 5) e += '🤷';                                  // near-even (nonzero, either sign)
   else if(balance > 0) e += pct < 15 ? '😅' : pct < 30 ? '😁' : pct < 50 ? '🥳' : '🍾';
   else                 e += pct < 15 ? '😓' : pct < 30 ? '😫' : pct < 50 ? '😭' : '😱';
   return e;
+}
+
+// Tag every person in a descending-sorted list with their node emojis, using
+// tie-aware competition ranks.
+function tagEmojis(list, pot){
+  const ranks = compRanks(list.map(p => p.balance));
+  list.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, ranks[i], list.length, ranks[list.length - 1]); });
 }
 
 function colorFor(i){
@@ -955,46 +975,65 @@ function initBalTable(){
 }
 
 // Rank medal for the balances table: 🥇 #1, 🥈 #2, 💩 last (poker-only, via the
-// shared rankEmoji gate). people is sorted by balance desc, so the row index = rank.
-const tableMedal = (rank, count) => rankEmoji(rank, count, '🥇');
+// shared rankEmoji gate). Takes tie-aware competition ranks from compRanks.
+const tableMedal = (rank, count, lastRank) => rankEmoji(rank, count, '🥇', lastRank);
 
-// Medals earned per person in one dated column (name -> medal char). Mirrors how
-// showDataset builds `people`: present people only, sorted by balance desc.
+// Medals earned per person in one dated column (name -> {md, share}). Mirrors how
+// showDataset builds `people`: present people only, sorted by balance desc. A tie
+// splits the medal like a chopped pot: each of the k tied people earns share = 1/k.
 function columnMedals(colIdx){
   const list = [];
   rawPeople.forEach(rp => { const v = rp.values[colIdx]; if(v != null) list.push({ name: rp.name, balance: v }); });
   list.sort((a, b) => b.balance - a.balance);
+  const ranks = compRanks(list.map(p => p.balance));
   const m = new Map();
-  list.forEach((p, i) => { const md = tableMedal(i, list.length); if(md) m.set(p.name, md); });
+  list.forEach((p, i) => {
+    const md = tableMedal(ranks[i], list.length, ranks[list.length - 1]);
+    if(md) m.set(p.name, { md, share: 1 / ranks.filter(r => r === ranks[i]).length });
+  });
   return m;
 }
 
-// Render a bag of medal chars in 🥇→🥈→💩 order as tokens — "🥇×11" (a single medal
-// stays bare, no "×1"). Each token is a nowrap span so a wrapping Name cell can't
-// split a medal from its count; me-3 spaces the tokens apart (no separator char).
+// "×2½"-style count suffix: integer part + a vulgar-fraction glyph for the tie
+// shares (halves/thirds/quarters); a single whole medal stays bare (no "×1");
+// an odd fraction falls back to a decimal.
+const FRAC_GLYPHS = [[1/2, '½'], [1/3, '⅓'], [2/3, '⅔'], [1/4, '¼'], [3/4, '¾'], [1/6, '⅙'], [5/6, '⅚']];
+function countLabel(n){
+  const whole = Math.floor(n + 1e-9);
+  const frac = n - whole;
+  let f = '';
+  if(frac > 1e-9){
+    const hit = FRAC_GLYPHS.find(([v]) => Math.abs(frac - v) < 0.01);
+    f = hit ? hit[1] : frac.toFixed(1).slice(1);
+  }
+  return (whole === 1 && !f) ? '' : '×' + (whole || '') + f;
+}
+
+// Render a bag of medal counts in 🥇→🥈→💩 order as tokens — "🥇×11", "🥇×1½".
+// Each token is a nowrap span so a wrapping Name cell can't split a medal from its
+// count; me-3 spaces the tokens apart (no separator char).
 const MEDAL_ORDER = ['🥇', '🥈', '💩'];
-function medalString(arr){
-  const counts = {};
-  for(const m of arr) counts[m] = (counts[m] || 0) + 1;
+function medalString(counts){
   const kinds = MEDAL_ORDER.filter(k => counts[k]);
   return kinds
-    .map((k, i) => `<span class="text-nowrap${i < kinds.length - 1 ? ' me-3' : ''}">${k}${counts[k] > 1 ? '×' + counts[k] : ''}</span>`)
+    .map((k, i) => `<span class="text-nowrap${i < kinds.length - 1 ? ' me-3' : ''}">${k}${countLabel(counts[k])}</span>`)
     .join('');
 }
 
 // All medals each person accumulated across the dated columns (every dataset with a
-// source col — i.e. not the virtual All Time).
+// source col — i.e. not the virtual All Time). Tie shares sum up (½ + ½ = 1 gold).
 function accumulatedMedals(){
-  const acc = new Map();   // name -> [medal chars]
+  const acc = new Map();   // name -> {medal char: summed share}
   datasets.forEach((d, ci) => {
     if(d.col === undefined) return;
-    for(const [name, md] of columnMedals(ci)){
-      if(!acc.has(name)) acc.set(name, []);
-      acc.get(name).push(md);
+    for(const [name, {md, share}] of columnMedals(ci)){
+      if(!acc.has(name)) acc.set(name, {});
+      const c = acc.get(name);
+      c[md] = (c[md] || 0) + share;
     }
   });
   const out = new Map();
-  for(const [name, arr] of acc) out.set(name, medalString(arr));
+  for(const [name, counts] of acc) out.set(name, medalString(counts));
   return out;
 }
 
@@ -1018,7 +1057,8 @@ function renderTable(){
   const acc = isAllTime ? accumulatedMedals() : null;
 
   // Averages (computed once) + the top average gets a 👑 (suffixed first). All Time
-  // is sorted by average desc, so its # rank follows average order too.
+  // is sorted by average desc, so its # rank follows average order too (tie-aware,
+  // like every rank here: EPS-equal values share a competition rank, 1-1-3 style).
   let avg = null, crowned = new Set(), rankByName = null;
   if(showAverage){
     avg = new Map(people.map(p => { const s = seenCount(p.idx); return [p.name, s ? p.balance / s : 0]; }));
@@ -1027,17 +1067,20 @@ function renderTable(){
       people.forEach(p => { if(avg.get(p.name) === max) crowned.add(p.name); });
     }
     const order = [...people].sort((a, b) => avg.get(b.name) - avg.get(a.name));
-    rankByName = new Map(order.map((p, i) => [p.name, i + 1]));
+    const aRanks = compRanks(order.map(p => avg.get(p.name)));
+    rankByName = new Map(order.map((p, i) => [p.name, aRanks[i] + 1]));
   }
 
+  // people is sorted balance-desc: competition ranks for the # column + medals
+  const bRanks = compRanks(people.map(p => p.balance));
   const rows = people.map((p, i) => {
     let medal = '';
     if(isAllTime){
       medal = acc.get(p.name) || '';
       // crown prefix as its own me-3-spaced token (matches medalString spacing); crowned is empty unless poker
       if(crowned.has(p.name)) medal = `<span class="text-nowrap${medal ? ' me-3' : ''}">👑</span>` + medal;
-    }else medal = tableMedal(i, n);
-    const row = { rank: showAverage ? rankByName.get(p.name) : i + 1,
+    }else medal = tableMedal(bRanks[i], n, bRanks[n - 1]);
+    const row = { rank: showAverage ? rankByName.get(p.name) : bRanks[i] + 1,
       name: p.name, amount: p.balance, color: p.color, nodeId: p.nodeId, medal };
     if(showAverage) row.average = avg.get(p.name);
     return row;
@@ -1293,8 +1336,7 @@ function showDataset(idx){
   });
   // sort highest balance first, then tag each node with rank + magnitude emojis
   people.sort((a, b) => b.balance - a.balance);
-  const pot = totalPot();
-  people.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, people.length); });
+  tagEmojis(people, totalPot());
   markActiveDataset(idx);
 
   renderTable();
@@ -1350,7 +1392,7 @@ function renderSettlementGraph(balances){
   activeNode = null;
   balances.sort((a, b) => b.balance - a.balance);
   const pot = balances.reduce((s, p) => s + (p.balance > 0 ? p.balance : 0), 0);
-  balances.forEach((p, i) => { p.emoji = emojiFor(p.balance, pot, i, balances.length); });
+  tagEmojis(balances, pot);
   graphNodes = balances;
   showGraphCard();
   renderGraph(computeTransfers(balances).transfers);

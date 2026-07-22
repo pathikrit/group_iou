@@ -149,9 +149,20 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
   dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
-  **All Time** instead shows each person's medals *accumulated* across all
+  **Ties share a place** (user demand): every rank — the `#` column (balance,
+  and average on All Time) and all rank emojis (table medals + graph 👑/🥈/💩 via
+  `tagEmojis`) — is a **competition rank** from `compRanks` (1,1,3-style;
+  EPS-equal neighbors in the desc-sorted list share a rank), so tied people show
+  the same # and the same medal. Two golds → nobody holds rank 1 → no 🥈 that
+  night; a group tied at the *bottom* chops 💩, not 🥈 (last-place check precedes
+  runner-up in `rankEmoji` — without ties they can't collide). A tied medal is
+  **split like a chopped pot**: each of the k tied people earns `1/k` of it
+  (`columnMedals` returns `{md, share}`), and All Time sums the shares.
+  **All Time** shows each person's medals *accumulated* across all
   dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
-  medal-then-count token like `🥇×11` — a single medal stays bare, no `×1` — wrapped in a
+  medal-then-count token like `🥇×11` or `🥇×1½` — fractional shares render as
+  vulgar-fraction glyphs via `countLabel` (`FRAC_GLYPHS`, decimal fallback for odd
+  sums); a single whole medal stays bare, no `×1` — wrapped in a
   `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
   👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds an
   **Average** column (balance ÷ `seenCount` = #dated columns the person appears in),
