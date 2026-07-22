@@ -161,7 +161,7 @@
                      data-bs-title="Shade by rank among all 169 hands: worst = red, median = yellow, best = green">Relative</label>
               <input type="radio" class="btn-check" name="oddsMode" id="oddsModeBE" value="breakeven">
               <label class="btn btn-sm btn-outline-primary rounded-end-pill" for="oddsModeBE" id="oddsBeLabel" data-bs-toggle="tooltip"
-                     data-bs-title="Shade vs the fair-share win rate of 1/players: above = green, at = yellow, below = red">Break-even</label>
+                     data-bs-title="Shade vs the fair-share win rate of 1/players: above = green, below = red; within ±0.5% = blue (darker = higher)">Break-even</label>
             </div>
           </div>
           <div id="oddsLayout">
@@ -1477,7 +1477,8 @@ function markActiveDataset(idx){
    percent, generated once by calculator/poker.py — 1M Monte Carlo deals/cell),
    fetched lazily the first time the tab is shown. Two color scales: 'relative'
    (percentile rank among the 169 hands) and 'breakeven' (log-scaled vs the
-   1/players fair share, yellow at exactly break-even). */
+   1/players fair share; hands within ±0.5% of it show as a blue near-break-even
+   band, darker for higher win %). */
 let odds = null, oddsMode = 'relative';
 const oddsCells = [], oddsRows = [], oddsDesc = {};
 const oddsColor = hue => `hsl(${hue}, 62%, 36%)`;
@@ -1548,12 +1549,20 @@ function renderOdds(){
   const idx = n - 2, be = 100 / n;
   const sorted = Object.values(odds).map(a => a[idx]).sort((a, b) => a - b);
   document.getElementById('oddsBeLabel').textContent = `Break-even (${be.toFixed(1)}%)`;
-  const hueFor = eq => oddsMode === 'relative'
-    ? 120 * sorted.indexOf(eq) / (sorted.length - 1)  // red 0° .. green 120°
-    : 60 + 60 * Math.max(-1, Math.min(1, Math.log2(eq / be)));
+  // Break-even mode: hands within ±0.5% of the fair share are the near-break-even
+  // band — colored blue, darker for higher win % (lightness 55%→25% across the band).
+  const colorFor = eq => {
+    if(oddsMode === 'relative')
+      return oddsColor(120 * sorted.indexOf(eq) / (sorted.length - 1));  // red 0° .. green 120°
+    if(Math.abs(eq - be) <= 0.5){
+      const t = Math.max(0, Math.min(1, (eq - (be - 0.5)) / 1));
+      return `hsl(210, 70%, ${55 - 30 * t}%)`;
+    }
+    return oddsColor(60 + 60 * Math.max(-1, Math.min(1, Math.log2(eq / be))));
+  };
   for(const c of oddsCells){
     const eq = odds[c.label][idx];
-    c.div.style.background = oddsColor(hueFor(eq));
+    c.div.style.background = colorFor(eq);
     c.p.textContent = eq.toFixed(1) + '%';
   }
   Object.entries(odds).map(([label, a]) => [label, a[idx]])
@@ -1564,7 +1573,7 @@ function renderOdds(){
       hand.textContent = label;
       pct.textContent = eq.toFixed(1) + '%';
       for(const td of oddsRows[k]){
-        td.style.background = oddsColor(hueFor(eq));
+        td.style.background = colorFor(eq);
         td.dataset.bsToggle = 'tooltip';
         td.dataset.bsTitle = oddsDesc[label];
       }
