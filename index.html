@@ -161,7 +161,7 @@
                      data-bs-title="Shade by rank among all 169 hands: worst = red, median = yellow, best = green">Relative</label>
               <input type="radio" class="btn-check" name="oddsMode" id="oddsModeBE" value="breakeven">
               <label class="btn btn-sm btn-outline-primary rounded-end-pill" for="oddsModeBE" id="oddsBeLabel" data-bs-toggle="tooltip"
-                     data-bs-title="Shade vs the fair-share win rate of 1/players: above = green, below = red; within ±0.5% = blue (darker = lower)">Break-even</label>
+                     data-bs-title="Shade vs the fair-share win rate of 1/players: above = green, below = red (darker = lower); within ±0.5% = blue (darker = higher)">Break-even</label>
             </div>
           </div>
           <div id="oddsLayout">
@@ -1478,7 +1478,7 @@ function markActiveDataset(idx){
    fetched lazily the first time the tab is shown. Two color scales: 'relative'
    (percentile rank among the 169 hands) and 'breakeven' (log-scaled vs the
    1/players fair share; hands within ±0.5% of it show as a blue near-break-even
-   band, darker for lower win %). */
+   band, darker for higher win %; below-break-even reds darken the lower the win %). */
 let odds = null, oddsMode = 'relative';
 const oddsCells = [], oddsRows = [], oddsDesc = {};
 const oddsColor = hue => `hsl(${hue}, 62%, 36%)`;
@@ -1550,15 +1550,17 @@ function renderOdds(){
   const sorted = Object.values(odds).map(a => a[idx]).sort((a, b) => a - b);
   document.getElementById('oddsBeLabel').textContent = `Break-even (${be.toFixed(1)}%)`;
   // Break-even mode: hands within ±0.5% of the fair share are the near-break-even
-  // band — colored blue, darker for lower win % (lightness 25%→55% across the band).
+  // band — colored blue, darker for higher win % (lightness 55%→25% across the band).
+  // Below the band (below break-even) shades red AND darkens the lower the win % is.
   const colorFor = eq => {
     if(oddsMode === 'relative')
       return oddsColor(120 * sorted.indexOf(eq) / (sorted.length - 1));  // red 0° .. green 120°
     if(Math.abs(eq - be) <= 0.5){
       const t = Math.max(0, Math.min(1, (eq - (be - 0.5)) / 1));
-      return `hsl(210, 70%, ${25 + 30 * t}%)`;
+      return `hsl(210, 70%, ${55 - 30 * t}%)`;
     }
-    return oddsColor(60 + 60 * Math.max(-1, Math.min(1, Math.log2(eq / be))));
+    const r = Math.max(-1, Math.min(1, Math.log2(eq / be)));   // -1 .. +1, 0 at break-even
+    return `hsl(${60 + 60 * r}, 62%, ${r < 0 ? 36 + 18 * r : 36}%)`;  // red<be<green; darker the lower below be
   };
   for(const c of oddsCells){
     const eq = odds[c.label][idx];
