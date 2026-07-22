@@ -348,18 +348,18 @@ function compRanks(vals){
 }
 
 // Win/loss ranking emoji for a person at competition rank `rank` of `count`
-// (best-first): winner / runner-up / last place. Ties share a rank, so everyone
-// tied at a medal spot shows that medal (two golds -> no silver that night: nobody
-// holds rank 1). Last place outranks runner-up when a tie makes both apply (a
-// group tied at the bottom chops 💩, not 🥈) — without ties the two can't collide.
-// THE single source of the poker gate — returns '' unless poker mode is on, so
-// callers (graph + table) never branch on pokerMode. `gold` is the winner glyph
-// (👑 in the graph, 🥇 in the table).
+// (best-first): only two medals — winner (gold) and last place (💩). Ties share a
+// rank, so everyone tied for first shows gold and everyone tied for last shows 💩.
+// When EVERYONE is tied (all balances equal — necessarily all $0 since they net to
+// zero) there's no winner or loser, so nobody gets a medal (lastRank === 0 means the
+// last person shares rank 0 with the first — i.e. one big tie). This also prevents a
+// single person from getting both gold and 💩. THE single source of the poker gate —
+// returns '' unless poker mode is on, so callers (graph + table) never branch on
+// pokerMode. `gold` is the winner glyph (👑 in the graph, 🥇 in the table).
 function rankEmoji(rank, count, gold, lastRank = count - 1){
-  if(!pokerMode || count < 2) return '';
+  if(!pokerMode || count < 2 || lastRank === 0) return '';
   if(rank === 0) return gold;
   if(rank === lastRank) return '💩';
-  if(rank === 1 && count >= 3) return '🥈';
   return '';
 }
 
@@ -974,13 +974,13 @@ function initBalTable(){
   });
 }
 
-// Rank medal for the balances table: 🥇 #1, 🥈 #2, 💩 last (poker-only, via the
-// shared rankEmoji gate). Takes tie-aware competition ranks from compRanks.
+// Rank medal for the balances table: 🥇 #1, 💩 last (poker-only, via the shared
+// rankEmoji gate). Takes tie-aware competition ranks from compRanks.
 const tableMedal = (rank, count, lastRank) => rankEmoji(rank, count, '🥇', lastRank);
 
-// Medals earned per person in one dated column (name -> {md, share}). Mirrors how
-// showDataset builds `people`: present people only, sorted by balance desc. A tie
-// splits the medal like a chopped pot: each of the k tied people earns share = 1/k.
+// Medals earned per person in one dated column (name -> medal char). Mirrors how
+// showDataset builds `people`: present people only, sorted by balance desc. Ties
+// share a rank, so every tied winner/loser earns the whole medal (no splitting).
 function columnMedals(colIdx){
   const list = [];
   rawPeople.forEach(rp => { const v = rp.values[colIdx]; if(v != null) list.push({ name: rp.name, balance: v }); });
@@ -989,30 +989,20 @@ function columnMedals(colIdx){
   const m = new Map();
   list.forEach((p, i) => {
     const md = tableMedal(ranks[i], list.length, ranks[list.length - 1]);
-    if(md) m.set(p.name, { md, share: 1 / ranks.filter(r => r === ranks[i]).length });
+    if(md) m.set(p.name, md);
   });
   return m;
 }
 
-// "×2½"-style count suffix: integer part + a vulgar-fraction glyph for the tie
-// shares (halves/thirds/quarters); a single whole medal stays bare (no "×1");
-// an odd fraction falls back to a decimal.
-const FRAC_GLYPHS = [[1/2, '½'], [1/3, '⅓'], [2/3, '⅔'], [1/4, '¼'], [3/4, '¾'], [1/6, '⅙'], [5/6, '⅚']];
+// "×2"-style count suffix; a single medal stays bare (no "×1").
 function countLabel(n){
-  const whole = Math.floor(n + 1e-9);
-  const frac = n - whole;
-  let f = '';
-  if(frac > 1e-9){
-    const hit = FRAC_GLYPHS.find(([v]) => Math.abs(frac - v) < 0.01);
-    f = hit ? hit[1] : frac.toFixed(1).slice(1);
-  }
-  return (whole === 1 && !f) ? '' : '×' + (whole || '') + f;
+  return n === 1 ? '' : '×' + n;
 }
 
-// Render a bag of medal counts in 🥇→🥈→💩 order as tokens — "🥇×11", "🥇×1½".
-// Each token is a nowrap span so a wrapping Name cell can't split a medal from its
-// count; me-3 spaces the tokens apart (no separator char).
-const MEDAL_ORDER = ['🥇', '🥈', '💩'];
+// Render a bag of medal counts in 🥇→💩 order as tokens — "🥇×11". Each token is a
+// nowrap span so a wrapping Name cell can't split a medal from its count; me-3 spaces
+// the tokens apart (no separator char).
+const MEDAL_ORDER = ['🥇', '💩'];
 function medalString(counts){
   const kinds = MEDAL_ORDER.filter(k => counts[k]);
   return kinds
@@ -1021,15 +1011,15 @@ function medalString(counts){
 }
 
 // All medals each person accumulated across the dated columns (every dataset with a
-// source col — i.e. not the virtual All Time). Tie shares sum up (½ + ½ = 1 gold).
+// source col — i.e. not the virtual All Time).
 function accumulatedMedals(){
-  const acc = new Map();   // name -> {medal char: summed share}
+  const acc = new Map();   // name -> {medal char: count}
   datasets.forEach((d, ci) => {
     if(d.col === undefined) return;
-    for(const [name, {md, share}] of columnMedals(ci)){
+    for(const [name, md] of columnMedals(ci)){
       if(!acc.has(name)) acc.set(name, {});
       const c = acc.get(name);
-      c[md] = (c[md] || 0) + share;
+      c[md] = (c[md] || 0) + 1;
     }
   });
   const out = new Map();
@@ -1048,7 +1038,7 @@ function renderTable(){
   const label = datasets[selectedDataset] ? datasets[selectedDataset].label : '';
   const n = people.length;
   // All Time accumulates medals from every dated column + shows an Average column
-  // (balance ÷ times seen); dated columns get their own 🥇/🥈/💩. Medals, crown and
+  // (balance ÷ times seen); dated columns get their own 🥇/💩. Medals, crown and
   // the Average column are poker-mode features (the rankEmoji gate already empties
   // medals when off) — off means a plain ledger sorted by balance (so All Time
   // behaves like any dated column). (Outstanding IOUs live only on the IOUs tab.)

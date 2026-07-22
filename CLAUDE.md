@@ -148,22 +148,21 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   `buildDot`/`applyGraphSelection` operate on `graphNodes` so highlight/selection work
   in both.
 - **Balances table medals** (`renderTable`, suffixed after the name chip): each
-  dated column ranks its people and tags 🥇 #1 / 🥈 #2 / 💩 last (`tableMedal`).
-  **Ties share a place** (user demand): every rank — the `#` column (balance,
-  and average on All Time) and all rank emojis (table medals + graph 👑/🥈/💩 via
-  `tagEmojis`) — is a **competition rank** from `compRanks` (1,1,3-style;
+  dated column ranks its people and tags just two medals — 🥇 #1 / 💩 last
+  (`tableMedal`). **Ties share a place** (user demand): every rank — the `#` column
+  (balance, and average on All Time) and all rank emojis (table medals + graph 👑/💩
+  via `tagEmojis`) — is a **competition rank** from `compRanks` (1,1,3-style;
   EPS-equal neighbors in the desc-sorted list share a rank), so tied people show
-  the same # and the same medal. Two golds → nobody holds rank 1 → no 🥈 that
-  night; a group tied at the *bottom* chops 💩, not 🥈 (last-place check precedes
-  runner-up in `rankEmoji` — without ties they can't collide). A tied medal is
-  **split like a chopped pot**: each of the k tied people earns `1/k` of it
-  (`columnMedals` returns `{md, share}`), and All Time sums the shares.
+  the same # and the same medal. **Everyone tied for first gets 🥇; everyone tied for
+  last gets 💩** — a tied medal is NOT split, each tied person earns the whole medal.
+  **When everyone is tied** (all balances equal — necessarily all $0, since they net
+  to zero) there's no winner or loser so **nobody gets a medal** (`rankEmoji` bails
+  when `lastRank === 0`, i.e. the last person shares rank 0 with the first); this also
+  guarantees no one can hold both 🥇 and 💩.
   **All Time** shows each person's medals *accumulated* across all
-  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→🥈→💩, each kind as a
-  medal-then-count token like `🥇×11` or `🥇×1½` — fractional shares render as
-  vulgar-fraction glyphs via `countLabel` (`FRAC_GLYPHS`, decimal fallback for odd
-  sums); a single whole medal stays bare, no `×1` — wrapped in a
-  `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
+  dated columns (`accumulatedMedals`/`medalString`, sorted 🥇→💩, each kind as a
+  medal-then-count token like `🥇×11`; a single medal stays bare, no `×1` — wrapped in
+  a `text-nowrap` span so the count can never wrap away from its medal; tokens (and the
   👑 crown prefix) are spaced apart with `me-3`, no separator char). All Time also adds an
   **Average** column (balance ÷ `seenCount` = #dated columns the person appears in),
   toggled via bootstrap-table `showColumn`/`hideColumn`, and the **highest-average
@@ -177,7 +176,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   Elite is chunkier than Inter, so `html:has(body.poker-ui)` drops the root font ~2px
   (87.5%) while poker is on, keeping every rem-sized component at ~Inter's footprint so
   the toggle doesn't reflow the page (graph chips self-size in SVG units, so they're
-  exempt). When **off**: (1) **no ranking emojis** (🥇/🥈/💩 medals + 👑
+  exempt). When **off**: (1) **no ranking emojis** (🥇/💩 medals + 👑
   crown) anywhere — the single gate is **`rankEmoji(rank,count,gold)`** (returns ''
   unless poker; `gold` = 👑 in the graph, 🥇 in the table), which both `emojiFor` and
   `tableMedal` delegate to, so no caller branches on `pokerMode`; magnitude/👻/🤷
@@ -197,7 +196,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
   green up / red down in the table); otherwise `+`/`-` (positives get a `+`). Exact
   $0 gets no prefix. Transfer/ledger amounts stay unsigned (`moneyWhole`).
 - Node label = 3 rows (HTML-like DOT label): emoji(s) / name / $amount (`POINT-SIZE 8`).
-  Emojis (`emojiFor`): rank 👑/🥈/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
+  Emojis (`emojiFor`): rank 👑/💩 + magnitude tier 🍾🥳😁😅 / 🤷 / 😓😫😭😱, where
   the tier is chosen by the balance as a **% of the pot** (`totalPot` = sum of
   positive balances) so it scales with stakes; thresholds 5/15/30/50%. **Exact $0**
   (present, evened out) → 👻 (distinct from near-zero nonzero 🤷). **Missing** people
