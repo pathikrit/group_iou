@@ -620,6 +620,101 @@ function nameChip(name){
   return `<span class="badge" style="background-color:${bg};color:${textOn(bg)}">${escapeHtml(name)}</span>`;
 }
 
+// Reduce edge crossings. Graphviz's own mincross is a heuristic that can leave
+// avoidable crossings (e.g. a bottom debtor's edge arcing up across the middle — see
+// the demo). Since the transfers form a forest (each zero-sum group settles as a
+// spanning tree) a low-/zero-crossing layered drawing usually exists, so we compute a
+// good vertical order per rank here and pin it in buildDot via rank=same invisible
+// chains (graphviz honors those exactly). Ranks come from longest-path in the transfer
+// DAG (money flows debtor->creditor, no cycles); within each rank we run the classic
+// Sugiyama median + adjacent-transpose sweep from several deterministic restarts and
+// keep the best. Returns per-rank ordered name lists, or null if nothing to gain.
+function crossMinLayers(names, edges){
+  if(names.length < 3 || names.length > 60) return null;   // trivial / too big to bother
+  const set = new Set(names);
+  const out = new Map(names.map(n => [n, []]));
+  const inc = new Map(names.map(n => [n, []]));
+  const deg = new Map(names.map(n => [n, 0]));
+  for(const e of edges){
+    if(!set.has(e.from) || !set.has(e.to)) continue;
+    out.get(e.from).push(e.to); inc.get(e.to).push(e.from);
+    deg.set(e.to, deg.get(e.to) + 1);
+  }
+  // longest-path rank (Kahn topo). Same-rank nodes never have a path between them, so
+  // pinning them rank=same is always feasible.
+  const rank = new Map(names.map(n => [n, 0]));
+  const left = new Map(deg);
+  const q = names.filter(n => left.get(n) === 0);
+  while(q.length){
+    const u = q.shift();
+    for(const v of out.get(u)){
+      if(rank.get(v) < rank.get(u) + 1) rank.set(v, rank.get(u) + 1);
+      left.set(v, left.get(v) - 1);
+      if(left.get(v) === 0) q.push(v);
+    }
+  }
+  const maxR = Math.max(0, ...names.map(n => rank.get(n)));
+  const layers0 = Array.from({length: maxR + 1}, () => []);
+  names.forEach(n => layers0[rank.get(n)].push(n));
+  if(maxR === 0) return null;                              // single rank -> no crossings possible
+
+  const crossings = ord => {                              // total crossings across adjacent ranks
+    let c = 0;
+    for(let r = 0; r < maxR; r++){
+      const pu = new Map(ord[r].map((n, i) => [n, i])), pl = new Map(ord[r + 1].map((n, i) => [n, i]));
+      const segs = [];
+      for(const u of ord[r]) for(const v of out.get(u)) if(pl.has(v)) segs.push([pu.get(u), pl.get(v)]);
+      for(let i = 0; i < segs.length; i++) for(let j = i + 1; j < segs.length; j++)
+        if((segs[i][0] - segs[j][0]) * (segs[i][1] - segs[j][1]) < 0) c++;
+    }
+    return c;
+  };
+  const median = arr => {
+    const a = arr.filter(x => x >= 0).sort((x, y) => x - y);
+    if(!a.length) return -1;                              // no fixed neighbor -> keep current spot
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  };
+  const byKey = (layer, key) => layer.map((n, i) => [n, i])
+    .sort((A, B) => (key.get(A[0]) < 0 ? A[1] : key.get(A[0])) - (key.get(B[0]) < 0 ? B[1] : key.get(B[0])) || A[1] - B[1])
+    .map(x => x[0]);
+  const transpose = ord => {                              // greedily swap adjacent nodes while it helps
+    for(let go = true; go; ){
+      go = false;
+      for(let r = 0; r <= maxR; r++) for(let i = 0; i < ord[r].length - 1; i++){
+        const before = crossings(ord);
+        [ord[r][i], ord[r][i + 1]] = [ord[r][i + 1], ord[r][i]];
+        if(crossings(ord) < before) go = true; else [ord[r][i], ord[r][i + 1]] = [ord[r][i + 1], ord[r][i]];
+      }
+    }
+  };
+  const sweep = ord => {
+    for(let it = 0; it < 8; it++){
+      if(it % 2 === 0) for(let r = 1; r <= maxR; r++){
+        const pu = new Map(ord[r - 1].map((n, i) => [n, i]));
+        ord[r] = byKey(ord[r], new Map(ord[r].map(n => [n, median(inc.get(n).map(u => pu.get(u)))])));
+      }else for(let r = maxR - 1; r >= 0; r--){
+        const pl = new Map(ord[r + 1].map((n, i) => [n, i]));
+        ord[r] = byKey(ord[r], new Map(ord[r].map(n => [n, median(out.get(n).map(v => pl.get(v)))])));
+      }
+      transpose(ord);
+    }
+  };
+  // deterministic restarts (seeded PRNG -> identical layout on every re-render): restart
+  // 0 keeps the incoming balance-sorted order, the rest shuffle to escape local minima.
+  let s = 0x2545F491;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const shuffle = a => { for(let i = a.length - 1; i > 0; i--){ const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  let best = layers0.map(l => l.slice()), bestC = Infinity;
+  for(let r = 0; r < 40 && bestC > 0; r++){
+    const ord = r === 0 ? layers0.map(l => l.slice()) : layers0.map(l => shuffle(l.slice()));
+    sweep(ord);
+    const c = crossings(ord);
+    if(c < bestC){ bestC = c; best = ord.map(l => l.slice()); }
+  }
+  return best;
+}
+
 function buildDot(transfers){
   // graph font follows the mode: edges + non-poker chip labels use Inter (financial)
   // / Special Elite (poker fun). Poker chip text itself is Ewert/Rye (drawChipText).
@@ -672,6 +767,16 @@ function buildDot(transfers){
   transfers.forEach((t, i) => {
     dot += `  "${esc(t.from)}" -> "${esc(t.to)}" [id="edge-${i}", label="  ${moneyWhole(t.amount)}  "];\n`;
   });
+  // Pin a low-crossing vertical order per rank (see crossMinLayers): each rank becomes
+  // a rank=same subgraph whose invisible chain fixes the top->bottom order. Only the
+  // flow nodes (those in transfers) are ranked; $0 nodes stay out of this and keep
+  // their bottom anchor below. These invis edges have no rendered path, so the edge
+  // handlers (drag/highlight) already skip them, same as the $0-anchor edges.
+  const flow = [...new Set(transfers.flatMap(t => [t.from, t.to]))];
+  const layers = crossMinLayers(flow, transfers);
+  if(layers) for(const layer of layers) if(layer.length > 1){
+    dot += `  { rank=same; ${layer.map(n => `"${esc(n)}"`).join(' -> ')} [style=invis]; }\n`;
+  }
   // anchor settled ($0) nodes below the flow via an invisible edge from a creditor
   const zeros = graphNodes.filter(p => Math.abs(p.balance) <= EPS);
   const anchor = graphNodes.find(p => p.balance > EPS);

@@ -204,6 +204,19 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 - Graph shows everyone present, incl. exact-$0 nodes (no transfer edges). $0 nodes
   are pushed to the bottom by an invisible edge from a creditor to each (plain
   `rank=sink` doesn't work — they're disconnected). Missing people aren't drawn.
+- **Crossing minimization** (`crossMinLayers`, pinned in `buildDot`): Graphviz's own
+  mincross can leave avoidable crossings (a bottom debtor's edge arcing up across the
+  middle). Since transfers form a forest (each zero-sum group = a spanning tree) a
+  low-/zero-crossing layered drawing usually exists, so we compute a good vertical
+  order per rank and **pin it with `{ rank=same; a -> b -> c [style=invis]; }` chains**
+  — graphviz honors those exactly (verified). Ranks = longest-path in the transfer DAG
+  (debtor→creditor, acyclic; same-rank nodes never have a path between them, so
+  rank=same is always feasible); within a rank it runs the Sugiyama median +
+  adjacent-transpose sweep from a few **deterministic** seeded restarts (identical
+  layout every re-render) and keeps the fewest-crossings order. Only flow nodes (those
+  in transfers) are ranked — $0 nodes stay out and keep their bottom anchor. The invis
+  chain edges have no rendered path, so drag/highlight handlers skip them like the
+  $0-anchor edges. Skipped (graphviz default kept) when < 3 or > 60 flow nodes.
 - Click row or node → highlight that node + its edges + neighbors, dim the rest
   (`applyGraphSelection`, `selecting`/`keep`/`hl` classes; edges get DOT `id=edge-N`).
   Click graph blank space → `clearSelection`. Colors keyed by row index (stable
