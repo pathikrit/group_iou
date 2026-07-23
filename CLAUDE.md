@@ -227,18 +227,33 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
 - **Odds tab** (`#tab-odds`/`#pane-odds`, in the Balances-card tab bar; `d-none`
   unless poker mode — gated in `setPokerMode`, which kicks back to Balances if the
   tab was active when the mode turns off): pre-flop win % of the 169 canonical
-  hold'em starting hands vs N−1 random opponents. Data = `calculator/odds.json`
-  (`{ "AKs": [p2..p10], … }` in percent), generated ONCE by `calculator/poker.py`
-  (uv single-file script, 1M Monte-Carlo deals/cell ≈ ±0.1pp, `make odds` in
-  `calculator/`, ~15 min) and checked in — the tab lazy-fetches it on first show
-  (`showOdds`). UI (`buildOddsDom`/`renderOdds`): 13×13 grid (pairs on the
+  hold'em starting hands. Data = `calculator/odds.json`, generated ONCE by
+  `calculator/poker.py` (uv single-file script, 1M Monte-Carlo deals/cell ≈ ±0.1pp,
+  `make odds` in `calculator/`, ~30 min for the two passes) and checked in — the tab
+  lazy-fetches it on first show (`showOdds`). **Shape:**
+  `{ vsRandom: { "AKs": [p2..p10], … }, vsFold: { "AKs": [p2..p10], … },
+  foldMeta: { foldBelow, remaining: [r2..r10] } }` — `vsRandom` = equity vs N−1
+  uniformly random opponents; `vsFold` = equity when weak hands fold pre-flop (a
+  player folds when their own hand's vs-random win% is below `foldBelow`×the fair
+  share 1/N, default 1.0 = below your fair share; the fair share IS the field's
+  average equity, so this folds ~the below-average hands — recomputed per N, so the
+  field tightens as the table fills; a hand the hero would fold is `null`);
+  `remaining[i]` = expected live
+  players (incl. hero) at i+2 seats, so break-even = 100/remaining when folding.
+  `showOdds` normalises a **legacy flat `{ "AKs": [...] }`** file to `vsRandom`-only
+  (fold switch disabled). UI (`buildOddsDom`/`renderOdds`): 13×13 grid (pairs on the
   diagonal, suited upper-right, offsuit lower-left, A→2 header row/col) + a
   rank-ordered table (Rank/Hand/Win %) in a left panel exactly as tall as the grid
   (absolute + `overflow-y:auto`); noUiSlider for player count (2–10, value on the
-  thumb); color-scale pill = Bootstrap `btn-check` radio group — **Relative**
-  (percentile rank among the 169 hands → hue 0° red…120° green) vs **Break-even**
-  (log₂-scaled vs the 1/players fair share, yellow at exactly break-even; the pill
-  label shows the current break-even %). Plain-English hovers everywhere
+  thumb); **`#oddsFoldSwitch`** `.form-switch` ("Pre-flop fold", `oddsFold`) picks
+  `vsFold` vs `vsRandom`; the color-scale pill = Bootstrap `btn-check` radio group
+  (`oddsMode`) — **Relative** (percentile rank among the played hands → hue 0°
+  red…120° green; folded hands sort dead last / deepest red) vs **Break-even**
+  (log₂-scaled vs the fair share, yellow at exactly break-even; folded hands pin to
+  deepest red; the pill label shows the current break-even %, which follows
+  `remaining` when folding). Folded cells render the word **"fold"** instead of a %.
+  Both scales share one eased `hsl` ramp (`colorFor`, `m=|t|^0.6` — deeper greens /
+  darker reds away from the yellow midpoint). Plain-English hovers everywhere
   ("Pair of 7s", "Ace-King Suited") via ONE delegated `bootstrap.Tooltip`
   (`animation:false, delay:0` — instant, per user demand). Like Input, showing the
   tab hides the Transfers graph card. No text slop: no captions, footers, or legends.
@@ -263,6 +278,7 @@ The code MUST follow these exactly; keep the matching comment in `computeTransfe
     **NOT** build anything, so `calculator/odds.json` (checked in) is served as-is at
     `<site>/calculator/odds.json` (the Odds tab fetches that relative path). CI never
     runs `poker.py`; regenerating `odds.json` is a **one-time local** `make odds` in
-    `calculator/` (~15 min), then commit the new JSON.
+    `calculator/` (~30 min — two Monte-Carlo passes, vs-random + vs-fold), then
+    commit the new JSON.
 - Local: `python3 -m http.server` → `http://localhost:8000/` (not `file://`).
 - Sanity after JS edits: extract last `<script>` and `node --check` it.

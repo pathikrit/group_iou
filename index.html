@@ -155,6 +155,11 @@
           <div class="d-flex align-items-center gap-3 flex-wrap mb-3 pt-3">
             <span class="text-nowrap"># players:</span>
             <div id="playersSlider" class="flex-grow-1" style="min-width:150px"></div>
+            <div class="form-check form-switch text-nowrap mb-0">
+              <input class="form-check-input" type="checkbox" role="switch" id="oddsFoldSwitch" checked>
+              <label class="form-check-label" for="oddsFoldSwitch" data-bs-toggle="tooltip"
+                     data-bs-title="Assume weak hands fold pre-flop: hands whose win% is below their fair share (1/players) muck, so you face a tighter field">Pre-flop fold</label>
+            </div>
             <div class="btn-group" role="group" aria-label="Color scale">
               <input type="radio" class="btn-check" name="oddsMode" id="oddsModeRel" value="relative">
               <label class="btn btn-sm btn-outline-primary rounded-start-pill" for="oddsModeRel" data-bs-toggle="tooltip"
@@ -1609,13 +1614,17 @@ function markActiveDataset(idx){
 }
 
 /* ── Odds tab (poker mode) ────────────────────────────────────────────────────
-   Pre-flop win % of the 169 canonical starting hands vs N-1 random opponents,
-   for 2-10 players. Data: calculator/odds.json ({ "AKs": [p2..p10], … } in
-   percent, generated once by calculator/poker.py — 1M Monte Carlo deals/cell),
-   fetched lazily the first time the tab is shown. Two color scales: 'relative'
-   (percentile rank among the 169 hands) and 'breakeven' (log-scaled vs the
-   1/players fair share, yellow at exactly break-even). */
-let odds = null, oddsMode = 'breakeven';
+   Pre-flop win % of the 169 canonical starting hands, for 2-10 players. Data:
+   calculator/odds.json, generated once by calculator/poker.py (1M Monte Carlo
+   deals/cell), fetched lazily the first time the tab is shown. Shape:
+     { vsRandom: { "AKs": [p2..p10], … },   // vs N-1 uniformly random opponents
+       vsFold:   { "AKs": [p2..p10], … },   // opponents fold weak hands; null = hero folds
+       foldMeta: { remaining: [r2..r10], foldBelow } }  // r = expected live players (incl hero)
+   Legacy flat { "AKs": [...] } files are normalised to vsRandom-only (fold switch
+   disabled). The 'Pre-flop fold' switch (oddsFold) picks vsFold vs vsRandom; the
+   Relative/Break-even radios (oddsMode) pick the color scale — break-even = the
+   1/players fair share (100/remaining when folding). */
+let odds = null, oddsMode = 'breakeven', oddsFold = false;
 const oddsCells = [], oddsRows = [], oddsDesc = {};
 
 function buildOddsDom(){
@@ -1666,6 +1675,11 @@ function buildOddsDom(){
   slider.noUiSlider.on('update', renderOdds);
   for(const el of document.querySelectorAll('input[name=oddsMode]'))
     el.addEventListener('change', () => { oddsMode = el.value; renderOdds(); });
+  const foldSwitch = document.getElementById('oddsFoldSwitch');
+  foldSwitch.disabled = !odds.vsFold;             // legacy flat data → no fold matrix
+  if(foldSwitch.disabled) foldSwitch.checked = false;
+  oddsFold = foldSwitch.checked;                  // honor the HTML default (on)
+  foldSwitch.addEventListener('change', () => { oddsFold = foldSwitch.checked; renderOdds(); });
   // one delegated Tooltip for the whole pane; animation/delay off => instant hovers
   new bootstrap.Tooltip(document.getElementById('pane-odds'),
     { selector: '[data-bs-toggle="tooltip"]', animation: false, delay: 0, container: 'body' });
@@ -1673,7 +1687,9 @@ function buildOddsDom(){
 
 async function showOdds(){
   if(!odds){
-    odds = await (await fetch('calculator/odds.json')).json();
+    const raw = await (await fetch('calculator/odds.json')).json();
+    // normalise: legacy flat { "AKs": [...] } → vsRandom-only (fold switch disabled)
+    odds = raw.vsRandom ? raw : { vsRandom: raw, vsFold: null, foldMeta: null };
     buildOddsDom();
   }
   renderOdds();
@@ -1681,33 +1697,42 @@ async function showOdds(){
 
 function renderOdds(){
   const n = Math.round(+document.getElementById('playersSlider').noUiSlider.get());
-  const idx = n - 2, be = 100 / n;
-  const sorted = Object.values(odds).map(a => a[idx]).sort((a, b) => a - b);
+  const idx = n - 2;
+  const folding = oddsFold && odds.vsFold;
+  const data = folding ? odds.vsFold : odds.vsRandom;
+  // Break-even = the fair share of the pot: 100/N normally, but when weak hands fold
+  // only `remaining` players (incl. hero) reach the pot, so the share is bigger.
+  const be = folding ? 100 / odds.foldMeta.remaining[idx] : 100 / n;
+  const eqOf = label => data[label][idx];           // null = hero folds that hand
+  // percentile scale ranks only the hands actually played (folded ones sort dead last)
+  const sorted = Object.values(data).map(a => a[idx]).filter(v => v != null).sort((a, b) => a - b);
   document.getElementById('oddsBeLabel').textContent = `Break-even (${be.toFixed(1)}%)`;
   // Signed distance t in [-1, 1] from the scale's midpoint (t<0 red, t>0 green):
   //   relative   → percentile rank, 50th pct = median hand = 0 (yellow);
   //   break-even → log2(eq / fair share), the break-even odds = 0 (yellow).
-  // Eased (m = |t|^0.6) so the scale is non-linear — greens get richer and reds
-  // darker faster away from the yellow midpoint (both sat up + lightness down with m).
+  // Folded hands (null) pin to t=-1 (deepest red). Eased (m = |t|^0.6) so the scale
+  // is non-linear — greens get richer and reds darker faster away from the yellow.
   const colorFor = eq => {
-    const t = oddsMode === 'relative'
-      ? 2 * sorted.indexOf(eq) / (sorted.length - 1) - 1
-      : Math.max(-1, Math.min(1, Math.log2(eq / be)));
+    const t = eq == null ? -1
+      : oddsMode === 'relative'
+        ? 2 * sorted.indexOf(eq) / (sorted.length - 1) - 1
+        : Math.max(-1, Math.min(1, Math.log2(eq / be)));
     const m = Math.pow(Math.abs(t), 0.6);
     return `hsl(${60 + 60 * Math.sign(t) * m}, ${62 + 22 * m}%, ${38 - 15 * m}%)`;
   };
+  const show = eq => eq == null ? 'fold' : eq.toFixed(1) + '%';
   for(const c of oddsCells){
-    const eq = odds[c.label][idx];
+    const eq = eqOf(c.label);
     c.div.style.background = colorFor(eq);
-    c.p.textContent = eq.toFixed(1) + '%';
+    c.p.textContent = show(eq);
   }
-  Object.entries(odds).map(([label, a]) => [label, a[idx]])
-    .sort((a, b) => b[1] - a[1])
+  Object.keys(data).map(label => [label, eqOf(label)])
+    .sort((a, b) => (b[1] ?? -1) - (a[1] ?? -1))   // folded hands sink to the bottom
     .forEach(([label, eq], k) => {
       const [rank, hand, pct] = oddsRows[k];
       rank.textContent = k + 1;
       hand.textContent = label;
-      pct.textContent = eq.toFixed(1) + '%';
+      pct.textContent = show(eq);
       for(const td of oddsRows[k]){
         td.style.background = colorFor(eq);
         td.dataset.bsToggle = 'tooltip';
